@@ -9,10 +9,14 @@
  * convention:
  *
  *   1. `pr-body-from-vault-file` (FIRST — write the body first)
- *      `gh pr create|new|edit` must take the body from `--body-file`
- *      pointing at a file INSIDE a napkin vault under a
- *      `<repo>/prs/` directory. Inline `--body` is blocked. No
- *      content check — placement only (responsibility separation).
+ *      `gh pr create|new|edit` must take the body from
+ *      `--body-file <(pi-steering-github strip <vault-file>)` — a
+ *      process substitution wrapping the strip helper (removes the
+ *      note's YAML frontmatter + leading H1 before `gh` uploads it)
+ *      — pointing at a file INSIDE a napkin vault under a
+ *      `<repo>/prs/` directory. Direct vault paths upload verbatim
+ *      and are blocked, like inline `--body`. No content check —
+ *      placement only (responsibility separation).
  *
  *   2. `pr-create-needs-issue-link`
  *      `gh pr create|new` must carry a closing keyword
@@ -36,8 +40,10 @@
  *      PR title/body edits made between creation and merge.
  *
  *   4. `issue-body-from-vault-file`
- *      `gh issue create|edit` must take the body from `--body-file`
- *      inside a napkin vault under a `<repo>/issues/` directory.
+ *      `gh issue create|edit` must take the body from
+ *      `--body-file <(pi-steering-github strip <vault-file>)` inside
+ *      a napkin vault under a `<repo>/issues/` directory (same
+ *      strip-helper convention as step 1).
  *
  * Ported from the live prototype that ran in the global pi-steering
  * config; the prototype phase ended with the first live validation
@@ -143,10 +149,14 @@ export const ISSUE_BODY_ANCHOR = /^gh\s+issue\s+(?:create|edit)\b/i;
 
 /**
  * `pr-body-from-vault-file` — PR bodies must come from a body file in
- * the napkin vault (create, new, and edit). Inline `--body` is
- * blocked; the file must be inside a napkin vault under a
- * `<repo>/prs/` directory. Placement only — the closing-keyword
- * content check belongs to `pr-create-needs-issue-link`.
+ * the napkin vault, uploaded through the strip helper (create, new,
+ * and edit): `--body-file <(pi-steering-github strip <vault-file>)`
+ * — a process substitution wrapping the strip CLI, which removes
+ * frontmatter + H1 before `gh` uploads the content. Direct vault
+ * paths (verbatim upload) and inline `--body` are blocked; the file
+ * must be inside a napkin vault under a `<repo>/prs/` directory.
+ * Placement only — the closing-keyword content check belongs to
+ * `pr-create-needs-issue-link`.
  *
  * Strict — no override (schema default).
  */
@@ -157,17 +167,17 @@ export const prBodyFromVaultFile = {
   pattern: PR_BODY_ANCHOR,
   when: { missingVaultBodyFile: { section: "prs" } },
   reason:
-    `PR bodies must come from a body file in the napkin vault — write it first, ` +
-    `then reference it:\n` +
+    `PR bodies must come from a body file in the napkin vault, uploaded through the ` +
+    `strip helper (removes frontmatter + H1):\n` +
     `  gh pr create --title "..." --body-file ` +
-    `<vault>/**/<repo>/prs/YYYY-MM-DD-pr<N>-<slug>.md\n`,
+    `<(pi-steering-github strip <vault>/**/<repo>/prs/YYYY-MM-DD-pr<N>-<slug>.md)\n`,
 } as const satisfies Rule;
 
 /**
  * `pr-create-needs-issue-link` — a PR may not be opened without at
  * least one attached issue: a closing keyword + `#N` in BOTH the
- * inline `--title` value and the body (vault body-file content, with
- * inline `--body` as a fallback). Fires when EITHER is missing
+ * inline `--title` value and the body (stripped vault body-file
+ * content, with inline `--body` as a fallback). Fires when EITHER is missing
  * (`when.condition` is an OR — the pattern only anchors the command).
  *
  * Does NOT fire on other gh subcommands. Fires on draft PRs without
@@ -221,10 +231,12 @@ export const prMergeNeedsClosingKeywords = {
 
 /**
  * `issue-body-from-vault-file` — issue bodies must come from a body
- * file in the napkin vault (create and edit). Inline `--body` is
- * blocked; the file must be inside a napkin vault under a
- * `<repo>/issues/` directory. No keyword requirement (issues close
- * nothing).
+ * file in the napkin vault, uploaded through the strip helper
+ * (create and edit): `--body-file
+ * <(pi-steering-github strip <vault-file>)`. Direct vault paths
+ * (verbatim upload) and inline `--body` are blocked; the file must
+ * be inside a napkin vault under a `<repo>/issues/` directory. No
+ * keyword requirement (issues close nothing).
  *
  * Strict — no override (schema default).
  */
@@ -235,10 +247,10 @@ export const issueBodyFromVaultFile = {
   pattern: ISSUE_BODY_ANCHOR,
   when: { missingVaultBodyFile: { section: "issues" } },
   reason:
-    `Issue bodies must come from a body file in the napkin vault — write it first, ` +
-    `then reference it:\n` +
+    `Issue bodies must come from a body file in the napkin vault, uploaded through the ` +
+    `strip helper (removes frontmatter + H1):\n` +
     `  gh issue create --title "..." --body-file ` +
-    `<vault>/**/<repo>/issues/YYYY-MM-DD-issue<N>-<slug>.md\n` +
+    `<(pi-steering-github strip <vault>/**/<repo>/issues/YYYY-MM-DD-issue<N>-<slug>.md)\n` +
     `- If foreign issue: cd to the repo you want to file the issue ` +
     `and have a foreign subagent maintainer loop before filing`,
 } as const satisfies Rule;

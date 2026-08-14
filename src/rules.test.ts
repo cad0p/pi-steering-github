@@ -219,10 +219,10 @@ describe("github plugin — reason strings (byte-identity pins)", () => {
   it("pr-body-from-vault-file reason", () => {
     assert.equal(
       prBodyFromVaultFile.reason,
-      "PR bodies must come from a body file in the napkin vault — write it first, " +
-        "then reference it:\n" +
+      "PR bodies must come from a body file in the napkin vault, uploaded through the " +
+        "strip helper (removes frontmatter + H1):\n" +
         '  gh pr create --title "..." --body-file ' +
-        "<vault>/**/<repo>/prs/YYYY-MM-DD-pr<N>-<slug>.md\n",
+        "<(pi-steering-github strip <vault>/**/<repo>/prs/YYYY-MM-DD-pr<N>-<slug>.md)\n",
     );
   });
 
@@ -252,10 +252,10 @@ describe("github plugin — reason strings (byte-identity pins)", () => {
   it("issue-body-from-vault-file reason", () => {
     assert.equal(
       issueBodyFromVaultFile.reason,
-      "Issue bodies must come from a body file in the napkin vault — write it first, " +
-        "then reference it:\n" +
+      "Issue bodies must come from a body file in the napkin vault, uploaded through the " +
+        "strip helper (removes frontmatter + H1):\n" +
         '  gh issue create --title "..." --body-file ' +
-        "<vault>/**/<repo>/issues/YYYY-MM-DD-issue<N>-<slug>.md\n" +
+        "<(pi-steering-github strip <vault>/**/<repo>/issues/YYYY-MM-DD-issue<N>-<slug>.md)\n" +
         "- If foreign issue: cd to the repo you want to file the issue " +
         "and have a foreign subagent maintainer loop before filing",
     );

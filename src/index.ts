@@ -87,8 +87,10 @@ export default githubPlugin;
 export {
   argText,
   bodyHasClosingKeyword,
+  findBodyFileValue,
   findFlagValue,
   missingVaultBodyFile,
+  parseBodyFileArg,
   repoName,
   resolveAgainstCwd,
   unquote,
@@ -96,7 +98,9 @@ export {
 // Named re-exports for consumers that want to pick pieces: the
 // shipped rules (or the `rules` roster itself), the pattern constants
 // (pinned by the unit tests), the predicate handler, and the arg
-// helpers for `when.condition` escape-hatch use.
+// helpers (`findBodyFileValue` / `parseBodyFileArg` parse the
+// strip-helper substitution form) for `when.condition` escape-hatch
+// use.
 export {
   BODY_WITH_REF,
   CLOSING_KEYWORD,
