@@ -239,23 +239,23 @@ describe("github plugin — reason strings (byte-identity pins)", () => {
     );
   });
 
-  it("pr-merge-needs-closing-keywords reason (known grammar quirk preserved)", () => {
+  it("pr-merge-needs-closing-keywords reason", () => {
     assert.equal(
       prMergeNeedsClosingKeywords.reason,
-      "Merging requires a closing keywords in the squash commit subject " +
+      "Merging requires a closing keyword in the squash commit subject " +
         "— every PR must close at least one issue:\n" +
         '  gh pr merge --squash --subject "feat: x (closes #12)"\n' +
         '- Repeat the keyword per issue — "Closes #A #B" honors only the first number.\n',
     );
   });
 
-  it("issue-body-from-vault-file reason (known <repo>/prs/ wording quirk preserved)", () => {
+  it("issue-body-from-vault-file reason", () => {
     assert.equal(
       issueBodyFromVaultFile.reason,
       "Issue bodies must come from a body file in the napkin vault — write it first, " +
         "then reference it:\n" +
         '  gh issue create --title "..." --body-file ' +
-        "<vault>/**/<repo>/prs/YYYY-MM-DD-pr<N>-<slug>.md\n" +
+        "<vault>/**/<repo>/issues/YYYY-MM-DD-issue<N>-<slug>.md\n" +
         "- If foreign issue: cd to the repo you want to file the issue " +
         "and have a foreign subagent maintainer loop before filing",
     );

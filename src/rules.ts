@@ -213,7 +213,7 @@ export const prMergeNeedsClosingKeywords = {
   field: "command",
   pattern: PR_MERGE_PATTERN,
   reason:
-    `Merging requires a closing keywords in the squash commit subject ` +
+    `Merging requires a closing keyword in the squash commit subject ` +
     `— every PR must close at least one issue:\n` +
     `  gh pr merge --squash --subject "feat: x (closes #12)"\n` +
     `- Repeat the keyword per issue — "Closes #A #B" honors only the first number.\n`,
@@ -238,7 +238,7 @@ export const issueBodyFromVaultFile = {
     `Issue bodies must come from a body file in the napkin vault — write it first, ` +
     `then reference it:\n` +
     `  gh issue create --title "..." --body-file ` +
-    `<vault>/**/<repo>/prs/YYYY-MM-DD-pr<N>-<slug>.md\n` +
+    `<vault>/**/<repo>/issues/YYYY-MM-DD-issue<N>-<slug>.md\n` +
     `- If foreign issue: cd to the repo you want to file the issue ` +
     `and have a foreign subagent maintainer loop before filing`,
 } as const satisfies Rule;
