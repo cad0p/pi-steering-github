@@ -229,4 +229,11 @@ describe("runCli", () => {
     assert.equal(runCli(["edit", "x.md"], io), 1);
     assert.match(io.read("stderr"), /unknown command/);
   });
+
+  it("extra args after the file → error on stderr, exit 1", () => {
+    const io = capture();
+    assert.equal(runCli(["strip", "note.md", "extra"], io), 1);
+    assert.equal(io.read("stdout"), "");
+    assert.match(io.read("stderr"), /exactly one <file>/);
+  });
 });

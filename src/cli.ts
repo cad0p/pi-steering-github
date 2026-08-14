@@ -75,6 +75,12 @@ export function runCli(
     );
     return 1;
   }
+  if (argv.length > 2) {
+    io.stderr.write(
+      `pi-steering-github: "strip" takes exactly one <file> argument\n`,
+    );
+    return 1;
+  }
   try {
     io.stdout.write(stripVaultBodyFile(file));
     return 0;

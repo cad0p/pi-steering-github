@@ -237,6 +237,20 @@ describe("findBodyFileValue", () => {
     assert.equal(findBodyFileValue(ctx), "body.md");
   });
 
+  it("handles the walker-split glued short form (-F= + next word)", () => {
+    const ctx = makeCtx(
+      [
+        { text: "-F=" },
+        { text: "<(pi-steering-github strip /vault/prs/body.md)" },
+      ],
+      "/work/repo",
+    );
+    assert.equal(
+      findBodyFileValue(ctx),
+      "<(pi-steering-github strip /vault/prs/body.md)",
+    );
+  });
+
   it("returns '' when the flag is absent", () => {
     const ctx = makeCtx([{ text: "--title" }, { text: "x" }], "/work/repo");
     assert.equal(findBodyFileValue(ctx), "");
@@ -346,6 +360,17 @@ describe("bodyHasClosingKeyword", () => {
       bodyFile,
       "---\ncloses: #12\n---\n# Title\n\nNo keyword here.\n",
     );
+    const ctx = makeCtx(
+      [{ text: "--body-file" }, { text: stripSubstitution(bodyFile) }],
+      vault,
+    );
+    assert.equal(bodyHasClosingKeyword(ctx), false);
+  });
+
+  it("is false when the keyword ONLY appears in the H1 (heading is stripped too)", () => {
+    const vault = makeVaultDir();
+    const bodyFile = join(vault, "body.md");
+    writeFileSync(bodyFile, "# Closes #12\n\nNo keyword here.\n");
     const ctx = makeCtx(
       [{ text: "--body-file" }, { text: stripSubstitution(bodyFile) }],
       vault,
