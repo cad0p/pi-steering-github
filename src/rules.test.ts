@@ -19,7 +19,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { PredicateContext } from "@cad0p/pi-steering";
+import { FRONTMATTER_STRIP } from "./predicates/missing-vault-body-file.ts";
 import {
   BODY_WITH_REF,
   CLOSING_KEYWORD,
@@ -212,75 +212,21 @@ describe("github plugin — reason strings (byte-identity pins)", () => {
   // The keyword-rule reason strings are byte-identical to the live
   // global-config prototype (verified at ship time 2026-08-14 by an
   // independent reviewer comparing both modules field-by-field); the
-  // two body-file rules were reworded in the strip-helper work
-  // (issue #3) to teach the substitution convention and became
-  // DYNAMIC (function form): the evaluator invokes them with the
-  // predicate ctx and tags the output. The pins below invoke the
-  // functions with a bin-present exec stub — the `pi-steering-github`
-  // helper on PATH (the missing-bin branch is pinned separately).
-  // Agents in the wild receive these verbatim in block reasons, and
-  // the global config's integration tests match rule NAMES only — so
-  // these literals are the only CI pin keeping the full reason text
-  // from drifting. A future reword MUST update this test in the same
+  // two body-file rules were reworded in the pinned-perl work (issue
+  // #3) to teach the frontmatter-stripping substitution. Agents in
+  // the wild receive these verbatim in block reasons, and the global
+  // config's integration tests match rule NAMES only — so these
+  // literals are the only CI pin keeping the full reason text from
+  // drifting. A future reword MUST update this test in the same
   // commit (and ideally the goldmine changelog note).
-
-  /** Exec stub that answers `command -v pi-steering-github` as FOUND. */
-  async function binFoundExec(): Promise<{
-    stdout: string;
-    stderr: string;
-    exitCode: number;
-  }> {
-    return {
-      stdout: "/usr/local/bin/pi-steering-github",
-      stderr: "",
-      exitCode: 0,
-    };
-  }
-
-  /** Minimal predicate ctx for invoking dynamic reasons. */
-  function reasonCtx(
-    exec: () => Promise<{ stdout: string; stderr: string; exitCode: number }>,
-  ): PredicateContext {
-    return {
-      cwd: "/work/repo",
-      tool: "bash",
-      input: {
-        tool: "bash",
-        command: "gh pr create",
-        basename: "gh",
-        args: [],
-      },
-      agentLoopIndex: 0,
-      exec,
-      appendEntry: () => {},
-      findEntries: () => [],
-      walkerState: {},
-    } as unknown as PredicateContext;
-  }
-
-  it("pr-body-from-vault-file reason (bin present)", async () => {
+  it("pr-body-from-vault-file reason", () => {
     assert.equal(
-      await prBodyFromVaultFile.reason(reasonCtx(binFoundExec)),
-      "PR bodies must come from a body file in the napkin vault, uploaded through the " +
-        "strip helper (removes frontmatter + H1):\n" +
+      prBodyFromVaultFile.reason,
+      "PR bodies must come from a vault note, uploaded through the frontmatter-stripping " +
+        "substitution (perl one-liner, pinned by the rule):\n" +
         '  gh pr create --title "..." --body-file ' +
-        "<(pi-steering-github strip <vault>/**/<repo>/prs/YYYY-MM-DD-pr<N>-<slug>.md)\n",
-    );
-  });
-
-  it("pr-body-from-vault-file reason (bin MISSING — install hint)", async () => {
-    const missing: () => Promise<{
-      stdout: string;
-      stderr: string;
-      exitCode: number;
-    }> = async () => ({ stdout: "", stderr: "", exitCode: 1 });
-    assert.equal(
-      await prBodyFromVaultFile.reason(reasonCtx(missing)),
-      "The strip helper (pi-steering-github) is not on PATH — install it, then retry:\n" +
-        "  pnpm add -g @cad0p/pi-steering-github\n" +
-        "then upload the body through the substitution:\n" +
-        '  gh pr create --title "..." --body-file ' +
-        "<(pi-steering-github strip <vault>/**/<repo>/prs/YYYY-MM-DD-pr<N>-<slug>.md)",
+        `<(perl -0777 -pe '${FRONTMATTER_STRIP}' ` +
+        "<vault>/**/<repo>/prs/YYYY-MM-DD-pr<N>-<slug>.md)\n",
     );
   });
 
@@ -307,31 +253,16 @@ describe("github plugin — reason strings (byte-identity pins)", () => {
     );
   });
 
-  it("issue-body-from-vault-file reason (bin present)", async () => {
+  it("issue-body-from-vault-file reason", () => {
     assert.equal(
-      await issueBodyFromVaultFile.reason(reasonCtx(binFoundExec)),
-      "Issue bodies must come from a body file in the napkin vault, uploaded through the " +
-        "strip helper (removes frontmatter + H1):\n" +
+      issueBodyFromVaultFile.reason,
+      "Issue bodies must come from a vault note, uploaded through the frontmatter-stripping " +
+        "substitution (perl one-liner, pinned by the rule):\n" +
         '  gh issue create --title "..." --body-file ' +
-        "<(pi-steering-github strip <vault>/**/<repo>/issues/YYYY-MM-DD-issue<N>-<slug>.md)\n" +
+        `<(perl -0777 -pe '${FRONTMATTER_STRIP}' ` +
+        "<vault>/**/<repo>/issues/YYYY-MM-DD-issue<N>-<slug>.md)\n" +
         "- If foreign issue: cd to the repo you want to file the issue " +
         "and have a foreign subagent maintainer loop before filing",
-    );
-  });
-
-  it("issue-body-from-vault-file reason (bin MISSING — install hint)", async () => {
-    const missing: () => Promise<{
-      stdout: string;
-      stderr: string;
-      exitCode: number;
-    }> = async () => ({ stdout: "", stderr: "", exitCode: 1 });
-    assert.equal(
-      await issueBodyFromVaultFile.reason(reasonCtx(missing)),
-      "The strip helper (pi-steering-github) is not on PATH — install it, then retry:\n" +
-        "  pnpm add -g @cad0p/pi-steering-github\n" +
-        "then upload the body through the substitution:\n" +
-        '  gh issue create --title "..." --body-file ' +
-        "<(pi-steering-github strip <vault>/**/<repo>/issues/YYYY-MM-DD-issue<N>-<slug>.md)",
     );
   });
 });

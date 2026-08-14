@@ -2,83 +2,60 @@
 // Part of pi-steering-github.
 
 /**
- * `when.missingVaultBodyFile` — fail-closed vault body-file check
- * backing the two body-file rules (`pr-body-from-vault-file` /
+ * `when.missingVaultBodyFile` — fail-closed form check backing the
+ * two body-file rules (`pr-body-from-vault-file` /
  * `issue-body-from-vault-file`).
  *
  * The ONLY accepted form for `--body-file` is a process substitution
- * wrapping the strip helper:
+ * running the pinned perl frontmatter-strip one-liner:
  *
- *   --body-file <(pi-steering-github strip <vault-file>)
+ *   --body-file <(perl -0777 -pe '<FRONTMATTER_STRIP>' <vault-note>)
  *
- * The helper removes the note's YAML frontmatter + leading H1 before
+ * The one-liner removes the note's YAML frontmatter block before
  * `gh` uploads it, so GitHub bodies render clean while vault files
- * stay byte-identical. Direct vault paths upload VERBATIM and are
- * blocked — the predicate is true (rule fires) when the `--body-file`
- * value is missing, unparsable (no substitution, non-`strip` inner
- * command), not wrapping a real file in a napkin vault
- * (`.napkin/` walk-up, via `@cad0p/pi-napkin/steering`), or not
- * under a `<repo>/<section>/` directory inside the vault (`<repo>` =
- * origin URL basename, falling back to the cwd folder name when the
- * remote is unresolvable). Fail-closed: anything unverifiable counts
- * as missing.
+ * stay byte-identical (nothing writes them). The predicate is a pure
+ * FORM check — it does no path validation and no content
+ * transformation: the `<vault-note>` argument is captured opaque and
+ * verified only at runtime by the substitution itself (a bad path
+ * makes perl fail → gh reads an empty fd → the agent self-corrects,
+ * the same feedback model as kb_read).
+ *
+ * The predicate is true (rule fires) when the `--body-file` value is
+ * missing, not the substitution form, or the inner command deviates
+ * from the pinned token sequence. Fail-closed: anything unverifiable
+ * counts as missing.
  *
  * Args:
  *
- *   - `section: "prs" | "issues"` — the vault-relative directory the
- *     body file must live under.
+ *   - `section: "prs" | "issues"` — carried for contract stability
+ *     (the section convention is taught by the rule reasons; it is
+ *     NOT enforced here).
  *
  * This module also exports the arg helpers (`findFlagValue`,
  * `findBodyFileValue`, `parseBodyFileArg`, `resolveAgainstCwd`,
- * `bodyHasClosingKeyword`, `repoName`, plus the low-level `argText` /
- * `unquote`) for unit tests and `when.condition` escape-hatch use.
+ * `bodyHasClosingKeyword`, plus the low-level `argText` / `unquote`)
+ * for unit tests and `when.condition` escape-hatch use.
  */
 
-import { existsSync, readFileSync, statSync } from "node:fs";
-import {
-  basename,
-  dirname,
-  isAbsolute,
-  relative,
-  resolve,
-  sep,
-} from "node:path";
-import { isNapkinVaultDir } from "@cad0p/pi-napkin/steering";
+import { readFileSync } from "node:fs";
+import { isAbsolute, resolve } from "node:path";
 import type { PredicateContext, PredicateHandler } from "@cad0p/pi-steering";
+import { FRONTMATTER_STRIP } from "../frontmatter-strip.ts";
 import { ISSUE_REF } from "../rules.ts";
-import { stripVaultBody } from "../strip.ts";
+
+export { FRONTMATTER_STRIP };
 
 // ---------------------------------------------------------------------------
-// The strip helper — the one trusted inner command
+// The pinned strip one-liner — the only accepted inner command
 // ---------------------------------------------------------------------------
 
-/**
- * The bin name of the strip helper CLI. The strict tokenizer accepts
- * EXACTLY `<(STRIP_HELPER_BIN strip <path>)` and the availability
- * check probes this name with `command -v` — both read this
- * constant, so renaming (or moving the helper into the napkin CLI)
- * is a one-line change.
- */
-export const STRIP_HELPER_BIN = "pi-steering-github";
-
-/**
- * Is the strip helper on PATH? Fail-closed: `true` only when
- * `command -v <bin>` exits 0 AND prints a non-empty path. A missing
- * bin means the accepted substitution form cannot work — gh would
- * read an empty fd and fail at runtime — so the body-file rules
- * block with an install hint instead (see the rules' dynamic
- * reasons). One `command -v` per body-file evaluation.
- */
-export async function isStripHelperAvailable(
-  ctx: PredicateContext,
-): Promise<boolean> {
-  try {
-    const res = await ctx.exec("sh", ["-c", `command -v ${STRIP_HELPER_BIN}`]);
-    return res.exitCode === 0 && (res.stdout?.trim() ?? "") !== "";
-  } catch {
-    return false;
-  }
-}
+/** The exact inner-command token sequence (before the path token). */
+export const STRIP_COMMAND_TOKENS: readonly string[] = [
+  "perl",
+  "-0777",
+  "-pe",
+  FRONTMATTER_STRIP,
+] as const;
 
 // ---------------------------------------------------------------------------
 // Arg helpers (run against the walker-parsed argv, not the raw string)
@@ -159,14 +136,16 @@ export function findBodyFileValue(ctx: PredicateContext): string {
 /**
  * A parsed `--body-file` value word:
  *
- *   - `substitution` — `<(pi-steering-github strip <vault-path>)`,
- *     the ONLY accepted form. `vaultPath` is the (unquoted) file
- *     argument of the strip helper.
- *   - `direct` — any other path-like word (blocked: uploads
- *     verbatim).
+ *   - `substitution` — `<(perl -0777 -pe '<FRONTMATTER_STRIP>' <path>)`,
+ *     the ONLY accepted form. `path` is the (unquoted) file argument
+ *     — captured OPAQUE: the predicate does not resolve or validate
+ *     it (runtime is the verifier).
+ *   - `direct` — any other path-like word (blocked; kept only so
+ *     `bodyHasClosingKeyword` can raw-read a direct path in the
+ *     disabled-rules combos).
  */
 export type BodyFileArg =
-  | { kind: "substitution"; vaultPath: string }
+  | { kind: "substitution"; path: string }
   | { kind: "direct"; path: string };
 
 /**
@@ -174,24 +153,31 @@ export type BodyFileArg =
  * closed by the callers).
  *
  * A `<( … )` word is accepted ONLY when the inner command is exactly
- * `pi-steering-github strip <path>` (shell word-split on the inner
- * text, quotes respected): any other inner command (`strip` bare —
- * GNU binutils collision — `cat`, `sed`, `pi-steering-github edit`,
- * …) is unparsable, because it would either upload garbage or not
- * strip at all.
+ * `perl -0777 -pe <FRONTMATTER_STRIP> <path>` (shell word-split on
+ * the inner text, quotes respected and stripped): the program token
+ * is byte-compared against the pinned constant, the path is the
+ * single remaining token. Any other inner command (`sed`, `awk`,
+ * `cat`, a different perl invocation, extra flags, missing path, …)
+ * is unparsable — either it would not strip at all or the pinned
+ * behavior could not be guaranteed.
  */
 export function parseBodyFileArg(word: string): BodyFileArg | null {
   if (word.startsWith("<(")) {
     if (!word.endsWith(")")) return null;
     const tokens = tokenizeInner(word.slice(2, -1).trim());
-    if (tokens.length === 3) {
-      const [bin, cmd, vaultPath] = tokens;
-      if (
-        bin === STRIP_HELPER_BIN &&
-        cmd === "strip" &&
-        vaultPath !== undefined
-      ) {
-        return { kind: "substitution", vaultPath };
+    if (tokens.length === STRIP_COMMAND_TOKENS.length + 1) {
+      let pinned = true;
+      for (let i = 0; i < STRIP_COMMAND_TOKENS.length; i++) {
+        if (tokens[i] !== STRIP_COMMAND_TOKENS[i]) {
+          pinned = false;
+          break;
+        }
+      }
+      if (pinned) {
+        const path = tokens[STRIP_COMMAND_TOKENS.length];
+        if (path !== undefined && path !== "") {
+          return { kind: "substitution", path };
+        }
       }
     }
     return null;
@@ -205,7 +191,7 @@ export function parseBodyFileArg(word: string): BodyFileArg | null {
  * whitespace separates tokens outside quotes; `"` and `'` quotes are
  * stripped when a token is extracted (equivalent to shell word
  * splitting on the inner text). An unmatched quote just ends the
- * token — the strict 3-token check downstream fails closed.
+ * token — the strict token-count + byte-pin downstream fails closed.
  */
 function tokenizeInner(text: string): string[] {
   const tokens: string[] = [];
@@ -245,24 +231,47 @@ export function resolveAgainstCwd(
 }
 
 /**
- * Does the command's body carry a closing-keyword reference? Reads
- * the STRIPPED `--body-file` content when present (frontmatter is
- * not body — a keyword that only appears in frontmatter must NOT
- * satisfy the check); falls back to the inline `--body` text.
- * Anything unreadable/missing = false (fail-closed).
+ * Does the command's body carry a closing-keyword reference?
+ *
+ * - substitution form: runs the pinned perl one-liner via `ctx.exec`
+ *   and tests its OUTPUT — the canonical input is exactly what gh
+ *   uploads (frontmatter stripped; the H1 is kept, so an H1 keyword
+ *   counts; a frontmatter-only keyword does not).
+ * - direct path / inline `--body`: raw content fallbacks for
+ *   configs that disable the body-file rules (documented README
+ *   combo).
+ *
+ * Anything unreadable / exec failure / non-zero exit = false
+ * (fail-closed).
  */
-export function bodyHasClosingKeyword(ctx: PredicateContext): boolean {
+export async function bodyHasClosingKeyword(
+  ctx: PredicateContext,
+): Promise<boolean> {
   const refRe = new RegExp(ISSUE_REF, "i");
   const value = findBodyFileValue(ctx);
   if (value !== "") {
     const parsed = parseBodyFileArg(value);
     if (parsed === null) return false; // unparsable value → fail-closed
-    const path =
-      parsed.kind === "substitution" ? parsed.vaultPath : parsed.path;
-    const abs = resolveAgainstCwd(ctx, path);
+    if (parsed.kind === "substitution") {
+      // The pinned one-liner IS the definition of the canonical body.
+      try {
+        const res = await ctx.exec("perl", [
+          "-0777",
+          "-pe",
+          FRONTMATTER_STRIP,
+          parsed.path,
+        ]);
+        if (res.exitCode !== 0) return false;
+        return refRe.test(res.stdout ?? "");
+      } catch {
+        return false;
+      }
+    }
+    // Direct-path fallback (disabled body-file rules): raw content.
+    const abs = resolveAgainstCwd(ctx, parsed.path);
     if (abs === null) return false;
     try {
-      return refRe.test(stripVaultBody(readFileSync(abs, "utf8")));
+      return refRe.test(readFileSync(abs, "utf8"));
     } catch {
       return false;
     }
@@ -273,89 +282,24 @@ export function bodyHasClosingKeyword(ctx: PredicateContext): boolean {
 }
 
 /**
- * Repository name: origin URL basename (`git config --get
- * remote.origin.url`, `.git` suffix stripped); falls back to the cwd
- * folder name when the remote is unresolvable (user decision
- * 2026-08-14). `null` only when both fail — caller treats as missing.
- */
-export async function repoName(
-  ctx: PredicateContext,
-  cwd: string,
-): Promise<string | null> {
-  try {
-    const res = await ctx.exec(
-      "git",
-      ["config", "--get", "remote.origin.url"],
-      { cwd },
-    );
-    const url = res.stdout?.trim() ?? "";
-    if (res.exitCode === 0 && url !== "") {
-      const name = basename(url).replace(/\.git$/, "");
-      if (name !== "") return name;
-    }
-  } catch {
-    // fall through to the cwd-basename fallback
-  }
-  const name = basename(cwd);
-  return name !== "" ? name : null;
-}
-
-/**
- * Is `abs` a valid vault body path for `section`? Exists + regular
- * file + inside a napkin vault (`.napkin/` walk-up) + under a
- * `<repo>/<section>/` directory inside the vault.
- */
-async function isValidVaultBodyPath(
-  abs: string,
-  section: "prs" | "issues",
-  ctx: PredicateContext,
-): Promise<boolean> {
-  if (!existsSync(abs) || !statSync(abs).isFile()) return false;
-  const vaultRoot = isNapkinVaultDir(dirname(abs));
-  if (vaultRoot === null) return false; // outside any vault → missing
-  // Repo = the origin of the git repo the COMMAND runs in (ctx.cwd), not
-  // the body file's dir: the file lives in the shared vault (Goldmine),
-  // whose own origin is the vault repo — dirname(abs) would always
-  // resolve to the vault's name and no body file could ever match.
-  const repo = await repoName(ctx, ctx.cwd);
-  if (repo === null) return false;
-  // Vault-relative path must contain <repo>/<section>/ (any depth —
-  // e.g. open-source/github/<repo>/prs/… or personal/github/<repo>/prs/…).
-  const segments = relative(vaultRoot, abs)
-    .split(sep)
-    .filter((s) => s !== "");
-  const repoIndex = segments.indexOf(repo);
-  return repoIndex !== -1 && segments[repoIndex + 1] === section;
-}
-
-/**
- * `missingVaultBodyFile` — fail-closed vault body-file check. True
- * when the command's `--body-file` value is missing, unparsable
- * (anything but the `<(pi-steering-github strip <vault-file>)`
- * substitution form — direct paths upload verbatim and are blocked),
- * unreadable, outside a napkin vault, or not under a
- * `<repo>/<section>/` directory inside the vault.
+ * `missingVaultBodyFile` — fail-closed FORM check. True when the
+ * command's `--body-file` value is missing, not the pinned
+ * `<(perl -0777 -pe '<FRONTMATTER_STRIP>' <path>)` substitution, or
+ * a direct path (uploaded verbatim — frontmatter renders on GitHub).
+ * The path argument itself is NOT validated (form-only): the
+ * substitution is the runtime verifier.
  */
 export const missingVaultBodyFile: PredicateHandler<{
   section: "prs" | "issues";
-}> = async (args, ctx) => {
+}> = async (_args, ctx) => {
   const value = findBodyFileValue(ctx);
   if (value === "") return true; // no body file at all → missing
   const parsed = parseBodyFileArg(value);
   if (parsed === null) return true; // unparsable value → fail-closed
   if (parsed.kind === "direct") {
-    // Direct vault paths upload the file VERBATIM (frontmatter + H1
-    // render on GitHub) — only the strip-helper substitution is
-    // accepted.
+    // Direct vault paths upload the file VERBATIM (frontmatter
+    // renders on GitHub) — only the pinned substitution is accepted.
     return true;
   }
-  if (!(await isStripHelperAvailable(ctx))) {
-    // The accepted form cannot work without the helper on PATH — gh
-    // would read an empty fd and fail at runtime. Fail-closed; the
-    // rule's dynamic reason teaches the install command.
-    return true;
-  }
-  const abs = resolveAgainstCwd(ctx, parsed.vaultPath);
-  if (abs === null) return true; // walker-unknown cwd → fail-closed
-  return !(await isValidVaultBodyPath(abs, args.section, ctx));
+  return false;
 };

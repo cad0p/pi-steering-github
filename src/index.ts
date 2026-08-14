@@ -87,21 +87,19 @@ export default githubPlugin;
 export {
   argText,
   bodyHasClosingKeyword,
+  FRONTMATTER_STRIP,
   findBodyFileValue,
   findFlagValue,
-  isStripHelperAvailable,
   missingVaultBodyFile,
   parseBodyFileArg,
-  repoName,
   resolveAgainstCwd,
-  STRIP_HELPER_BIN,
   unquote,
 } from "./predicates/missing-vault-body-file.ts";
 // Named re-exports for consumers that want to pick pieces: the
 // shipped rules (or the `rules` roster itself), the pattern constants
 // (pinned by the unit tests), the predicate handler, and the arg
 // helpers (`findBodyFileValue` / `parseBodyFileArg` parse the
-// strip-helper substitution form) for `when.condition` escape-hatch
+// pinned perl substitution form) for `when.condition` escape-hatch
 // use.
 export {
   BODY_WITH_REF,

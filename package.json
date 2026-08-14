@@ -2,7 +2,7 @@
 	"name": "@cad0p/pi-steering-github",
 	"version": "0.1.0",
 	"private": false,
-	"description": "GitHub workflow rules for pi-steering — every PR closes at least one issue; PR/issue bodies come from napkin vault body files.",
+	"description": "GitHub workflow rules for pi-steering \u2014 every PR closes at least one issue; PR/issue bodies come from napkin vault body files.",
 	"keywords": [
 		"pi-package",
 		"pi-steering-package",
@@ -16,9 +16,6 @@
 	"type": "module",
 	"main": "./dist/index.js",
 	"types": "./dist/index.d.ts",
-	"bin": {
-		"pi-steering-github": "./dist/cli.js"
-	},
 	"exports": {
 		".": {
 			"types": "./dist/index.d.ts",
