@@ -133,7 +133,11 @@ function hostWithRemote(
           killed: false,
         } satisfies ExecResult);
       }
-      if (cmd === "sh" && args[0] === "-c" && args[1]?.startsWith("command -v ")) {
+      if (
+        cmd === "sh" &&
+        args[0] === "-c" &&
+        args[1]?.startsWith("command -v ")
+      ) {
         // Model the strip helper as on PATH (fail-closed otherwise).
         return Promise.resolve({
           stdout: "/usr/local/bin/pi-steering-github",
@@ -306,7 +310,11 @@ describe("github plugin — PR rules (issue-link + vault body-file policy)", () 
     const fx = makeVaultRepoFixture(repo);
     const missingBinHost = createRecordingHost({
       exec: (cmd, args) => {
-        if (cmd === "sh" && args[0] === "-c" && args[1]?.startsWith("command -v ")) {
+        if (
+          cmd === "sh" &&
+          args[0] === "-c" &&
+          args[1]?.startsWith("command -v ")
+        ) {
           return Promise.resolve({
             stdout: "",
             stderr: "",

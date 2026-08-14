@@ -128,9 +128,17 @@ function originExec(remoteUrl: string): ExecStub {
     ) {
       return { stdout: remoteUrl, stderr: "", exitCode: 0 };
     }
-    if (cmd === "sh" && args[0] === "-c" && args[1]?.startsWith("command -v ")) {
+    if (
+      cmd === "sh" &&
+      args[0] === "-c" &&
+      args[1]?.startsWith("command -v ")
+    ) {
       // Model the strip helper as on PATH (fail-closed otherwise).
-      return { stdout: "/usr/local/bin/pi-steering-github", stderr: "", exitCode: 0 };
+      return {
+        stdout: "/usr/local/bin/pi-steering-github",
+        stderr: "",
+        exitCode: 0,
+      };
     }
     return { stdout: "", stderr: "", exitCode: 0 };
   };
@@ -481,11 +489,15 @@ describe("isStripHelperAvailable", () => {
     assert.equal(await isStripHelperAvailable(ctx), false);
   });
 
-  it("probes exactly `command -v ${STRIP_HELPER_BIN}`", async () => {
+  it("probes exactly the command -v probe for the helper bin", async () => {
     let probed: { cmd: string; args: string[] } | null = null;
     const ctx = makeCtx([], "/work/repo", async (cmd, args) => {
       probed = { cmd, args };
-      return { stdout: "/usr/local/bin/pi-steering-github", stderr: "", exitCode: 0 };
+      return {
+        stdout: "/usr/local/bin/pi-steering-github",
+        stderr: "",
+        exitCode: 0,
+      };
     });
     await isStripHelperAvailable(ctx);
     assert.deepEqual(probed, {
@@ -530,12 +542,12 @@ describe("missingVaultBodyFile", () => {
       ) {
         return { stdout: "", stderr: "", exitCode: 1 };
       }
-      if (
-        cmd === "git" &&
-        args[0] === "config" &&
-        args[1] === "--get"
-      ) {
-        return { stdout: "https://github.com/cad0p/fixture-repo.git", stderr: "", exitCode: 0 };
+      if (cmd === "git" && args[0] === "config" && args[1] === "--get") {
+        return {
+          stdout: "https://github.com/cad0p/fixture-repo.git",
+          stderr: "",
+          exitCode: 0,
+        };
       }
       return { stdout: "", stderr: "", exitCode: 0 };
     };

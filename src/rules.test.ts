@@ -19,6 +19,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import type { PredicateContext } from "@cad0p/pi-steering";
 import {
   BODY_WITH_REF,
   CLOSING_KEYWORD,
@@ -224,22 +225,37 @@ describe("github plugin — reason strings (byte-identity pins)", () => {
   // commit (and ideally the goldmine changelog note).
 
   /** Exec stub that answers `command -v pi-steering-github` as FOUND. */
-  async function binFoundExec(): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-    return { stdout: "/usr/local/bin/pi-steering-github", stderr: "", exitCode: 0 };
+  async function binFoundExec(): Promise<{
+    stdout: string;
+    stderr: string;
+    exitCode: number;
+  }> {
+    return {
+      stdout: "/usr/local/bin/pi-steering-github",
+      stderr: "",
+      exitCode: 0,
+    };
   }
 
   /** Minimal predicate ctx for invoking dynamic reasons. */
-  function reasonCtx(exec: () => Promise<{ stdout: string; stderr: string; exitCode: number }>) {
+  function reasonCtx(
+    exec: () => Promise<{ stdout: string; stderr: string; exitCode: number }>,
+  ): PredicateContext {
     return {
       cwd: "/work/repo",
       tool: "bash",
-      input: { tool: "bash", command: "gh pr create", basename: "gh", args: [] },
+      input: {
+        tool: "bash",
+        command: "gh pr create",
+        basename: "gh",
+        args: [],
+      },
       agentLoopIndex: 0,
       exec,
       appendEntry: () => {},
       findEntries: () => [],
       walkerState: {},
-    };
+    } as unknown as PredicateContext;
   }
 
   it("pr-body-from-vault-file reason (bin present)", async () => {
@@ -253,8 +269,11 @@ describe("github plugin — reason strings (byte-identity pins)", () => {
   });
 
   it("pr-body-from-vault-file reason (bin MISSING — install hint)", async () => {
-    const missing: () => Promise<{ stdout: string; stderr: string; exitCode: number }> =
-      async () => ({ stdout: "", stderr: "", exitCode: 1 });
+    const missing: () => Promise<{
+      stdout: string;
+      stderr: string;
+      exitCode: number;
+    }> = async () => ({ stdout: "", stderr: "", exitCode: 1 });
     assert.equal(
       await prBodyFromVaultFile.reason(reasonCtx(missing)),
       "The strip helper (pi-steering-github) is not on PATH — install it, then retry:\n" +
@@ -301,8 +320,11 @@ describe("github plugin — reason strings (byte-identity pins)", () => {
   });
 
   it("issue-body-from-vault-file reason (bin MISSING — install hint)", async () => {
-    const missing: () => Promise<{ stdout: string; stderr: string; exitCode: number }> =
-      async () => ({ stdout: "", stderr: "", exitCode: 1 });
+    const missing: () => Promise<{
+      stdout: string;
+      stderr: string;
+      exitCode: number;
+    }> = async () => ({ stdout: "", stderr: "", exitCode: 1 });
     assert.equal(
       await issueBodyFromVaultFile.reason(reasonCtx(missing)),
       "The strip helper (pi-steering-github) is not on PATH — install it, then retry:\n" +
