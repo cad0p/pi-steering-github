@@ -208,9 +208,11 @@ describe("github plugin — pr-merge-needs-closing-keywords (normalized form)", 
 });
 
 describe("github plugin — reason strings (byte-identity pins)", () => {
-  // The reason strings are byte-identical to the live global-config
-  // prototype (verified at ship time 2026-08-14 by an independent
-  // reviewer comparing both modules field-by-field). Agents in the
+  // The keyword-rule reason strings are byte-identical to the live
+  // global-config prototype (verified at ship time 2026-08-14 by an
+  // independent reviewer comparing both modules field-by-field); the
+  // two body-file rules were reworded in the strip-helper work
+  // (issue #3) to teach the substitution convention. Agents in the
   // wild receive these verbatim in block reasons, and the global
   // config's integration tests match rule NAMES only — so these
   // literals are the only CI pin keeping the full reason text from

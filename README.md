@@ -2,7 +2,7 @@
 
 GitHub workflow rules for [pi-steering](https://github.com/cad0p/pi-steering): every PR closes at least one issue; PR/issue bodies come from napkin vault body files.
 
-Ported from the live prototype that ran in the global pi-steering config (first live validation 2026-08-14, pi-steering PR #46 session: create gate fired, agent complied in 7s). Reason strings are byte-identical to the prototype — agents in the wild rely on them.
+Ported from the live prototype that ran in the global pi-steering config (first live validation 2026-08-14, pi-steering PR #46 session: create gate fired, agent complied in 7s). Reason strings are byte-identical to the prototype for the keyword rules; the two body-file rules teach the strip-helper convention (reworded when direct vault paths were blocked).
 
 ## What it ships
 
@@ -10,14 +10,14 @@ One `Plugin` (`name: "github"`) with four rules and one predicate:
 
 | Rule | Fires on | Blocks when |
 | --- | --- | --- |
-| `pr-body-from-vault-file` | `gh pr create \| new \| edit` | the body doesn't come from `--body-file` pointing at a `<repo>/prs/` napkin-vault file (inline `--body` is blocked) |
+| `pr-body-from-vault-file` | `gh pr create \| new \| edit` | the body doesn't come from `--body-file <(pi-steering-github strip <file>)` — a process substitution wrapping the strip helper — pointing at a `<repo>/prs/` napkin-vault file (direct paths and inline `--body` are blocked) |
 | `pr-create-needs-issue-link` | `gh pr create \| new` | the `--title` value or the body lacks a closing keyword + `#N` |
 | `pr-merge-needs-closing-keywords` | `gh pr merge` | `--subject` or `--body` lacks a closing keyword + `#N` |
-| `issue-body-from-vault-file` | `gh issue create \| edit` | the body doesn't come from `--body-file` pointing at a `<repo>/issues/` napkin-vault file |
+| `issue-body-from-vault-file` | `gh issue create \| edit` | the body doesn't come from the same strip-helper substitution, pointing at a `<repo>/issues/` napkin-vault file |
 
 | Predicate | Purpose |
 | --- | --- |
-| `missingVaultBodyFile` | true when `--body-file` is absent, unreadable, outside a napkin vault, or not under `<repo>/<section>/` inside the vault (fail-closed) |
+| `missingVaultBodyFile` | true when `--body-file` is absent, not a `<(pi-steering-github strip <file>)` substitution, unreadable, outside a napkin vault, or not under `<repo>/<section>/` inside the vault (fail-closed) |
 
 All rules are **strict** — no `noOverride: false`, so there is no agent-side override escape hatch. The policy is unconditional.
 
@@ -47,7 +47,7 @@ Listing the plugin feeds its rule/predicate names into `defineConfig`'s type uni
 
 ### `pr-body-from-vault-file`
 
-`gh pr create|new|edit` must take the body from `--body-file` pointing at a file **inside a napkin vault** under a `<repo>/prs/` directory. Inline `--body` is blocked entirely.
+`gh pr create|new|edit` must take the body from `--body-file <(pi-steering-github strip <file>)` — a process substitution wrapping the strip helper — pointing at a file **inside a napkin vault** under a `<repo>/prs/` directory. Direct vault paths upload the file **verbatim** (frontmatter + H1 render on GitHub) and are blocked, like inline `--body`.
 
 Placement only — no content check. The closing-keyword content check belongs to `pr-create-needs-issue-link` (responsibility separation). Why vault body files: they are reviewable, persistent, and kb-discoverable — the body is written and reviewed *before* the command runs, so the PR description is a deliberate artifact rather than an inline afterthought.
 
@@ -66,7 +66,32 @@ Placement only — no content check. The closing-keyword content check belongs t
 
 ### `issue-body-from-vault-file`
 
-`gh issue create|edit` must take the body from `--body-file` inside a napkin vault under a `<repo>/issues/` directory. No keyword requirement — issues close nothing.
+`gh issue create|edit` must take the body from the same strip-helper substitution form (`--body-file <(pi-steering-github strip <file>)`) inside a napkin vault under a `<repo>/issues/` directory. No keyword requirement — issues close nothing.
+
+### Strip helper (`pi-steering-github strip`)
+
+Vault notes carry YAML frontmatter and a leading `# H1`; the strip helper removes exactly those two artifacts so GitHub receives clean markdown:
+
+```bash
+pi-steering-github strip <file>   # stripped body → stdout; the file is only read
+```
+
+The `pi-steering-github` bin must be on the agent's `PATH` (the plugin's install links it). Direct `--body-file` vault paths are **blocked**, so a missing bin locks out both body-file rules — the shell fails on the substitution before `gh` even runs.
+
+The substitution is the ONLY accepted form for both PR and issue bodies, on create and edit:
+
+```bash
+gh pr create --title "..." --body-file <(pi-steering-github strip <vault>/**/<repo>/prs/2026-08-14-pr1-slug.md)
+gh pr edit 46 --body-file <(pi-steering-github strip <vault>/**/<repo>/prs/2026-08-14-pr1-slug.md)
+gh issue create --title "..." --body-file <(pi-steering-github strip <vault>/**/<repo>/issues/2026-08-14-issue1-slug.md)
+gh issue edit 29 --body-file <(pi-steering-github strip <vault>/**/<repo>/issues/2026-08-14-issue1-slug.md)
+```
+
+The glued form `--body-file=<(...)` and the short `-F <(...)` form are accepted too. The inner command is strict — only `pi-steering-github strip <path>` parses (no bare `strip`: that's GNU binutils on most systems).
+
+Strip semantics: the file starts (after an optional BOM) with `---` → everything through the next `---` / `...` line is removed, plus any following blank lines (an unterminated opening `---` is kept — fail-safe); then leading blank lines are skipped and a leading ATX H1 (`#`, `# `, `# text`) is dropped. `##` headings and `#foo` are never touched. The H1 is stripped **unconditionally** — a body-only file whose first line is `# ...` loses that heading (by design: it is the note's title). A note that strips to an empty body is not blocked (placement-only philosophy; the PR keyword rule still gates the PR side). Vault files are **never modified** — the helper only reads, so notes stay byte-identical.
+
+`<( )` process substitution needs bash ≥ 4 (or zsh): the pi `bash` tool qualifies, as do Git Bash and WSL on Windows. Plain `sh` and Windows `cmd` do not.
 
 ## Predicate
 
@@ -95,8 +120,10 @@ disabledRules: ["pr-body-from-vault-file", "issue-body-from-vault-file"],
 When the built-in predicate isn't enough, reach for the exported helpers inside `when.condition`:
 
 - `findFlagValue(ctx, flags)` — value of the first occurrence of a flag (space or `=` form), unquoted.
+- `findBodyFileValue(ctx)` — value of the first `--body-file` / `-F` occurrence (`""` when absent); handles the walker-split glued form `--body-file=<(...)`.
+- `parseBodyFileArg(word)` — classify a body-file value word: `{ kind: "substitution", vaultPath }` \| `{ kind: "direct", path }` \| `null`.
 - `resolveAgainstCwd(ctx, path)` — resolve a path against the command's effective cwd (`null` on walker-unknown cwd).
-- `bodyHasClosingKeyword(ctx)` — does the body (vault body-file content, or inline `--body`) carry a closing-keyword ref?
+- `bodyHasClosingKeyword(ctx)` — does the body (stripped vault body-file content, or inline `--body`) carry a closing-keyword ref?
 - `repoName(ctx, cwd)` — origin URL basename, cwd-basename fallback.
 - `unquote(text)` / `argText(ctx)` — low-level walker-word utilities.
 
