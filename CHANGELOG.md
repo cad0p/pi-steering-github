@@ -1,6 +1,17 @@
 # Changelog
 
-All notable changes to `pi-steering-github` are documented in this file.
+All notable changes to this project will be documented in this file.
+
+## [calver-released]
+
+<!-- USER-EDITABLE SECTION START -->
+<!-- Add your curated release notes here. -->
+<!-- USER-EDITABLE SECTION END -->
+
+### 🐛 Bug Fixes
+
+- Correct reason-string quirks — issues/ path hint + merge grammar (closes #4)
+
 
 ## [Unreleased]
 
