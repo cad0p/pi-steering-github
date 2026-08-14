@@ -49,6 +49,38 @@ import { ISSUE_REF } from "../rules.ts";
 import { stripVaultBody } from "../strip.ts";
 
 // ---------------------------------------------------------------------------
+// The strip helper — the one trusted inner command
+// ---------------------------------------------------------------------------
+
+/**
+ * The bin name of the strip helper CLI. The strict tokenizer accepts
+ * EXACTLY `<(STRIP_HELPER_BIN strip <path>)` and the availability
+ * check probes this name with `command -v` — both read this
+ * constant, so renaming (or moving the helper into the napkin CLI)
+ * is a one-line change.
+ */
+export const STRIP_HELPER_BIN = "pi-steering-github";
+
+/**
+ * Is the strip helper on PATH? Fail-closed: `true` only when
+ * `command -v <bin>` exits 0 AND prints a non-empty path. A missing
+ * bin means the accepted substitution form cannot work — gh would
+ * read an empty fd and fail at runtime — so the body-file rules
+ * block with an install hint instead (see the rules' dynamic
+ * reasons). One `command -v` per body-file evaluation.
+ */
+export async function isStripHelperAvailable(
+  ctx: PredicateContext,
+): Promise<boolean> {
+  try {
+    const res = await ctx.exec("sh", ["-c", `command -v ${STRIP_HELPER_BIN}`]);
+    return res.exitCode === 0 && (res.stdout?.trim() ?? "") !== "";
+  } catch {
+    return false;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Arg helpers (run against the walker-parsed argv, not the raw string)
 // ---------------------------------------------------------------------------
 
@@ -155,7 +187,7 @@ export function parseBodyFileArg(word: string): BodyFileArg | null {
     if (tokens.length === 3) {
       const [bin, cmd, vaultPath] = tokens;
       if (
-        bin === "pi-steering-github" &&
+        bin === STRIP_HELPER_BIN &&
         cmd === "strip" &&
         vaultPath !== undefined
       ) {
@@ -315,6 +347,12 @@ export const missingVaultBodyFile: PredicateHandler<{
     // Direct vault paths upload the file VERBATIM (frontmatter + H1
     // render on GitHub) — only the strip-helper substitution is
     // accepted.
+    return true;
+  }
+  if (!(await isStripHelperAvailable(ctx))) {
+    // The accepted form cannot work without the helper on PATH — gh
+    // would read an empty fd and fail at runtime. Fail-closed; the
+    // rule's dynamic reason teaches the install command.
     return true;
   }
   const abs = resolveAgainstCwd(ctx, parsed.vaultPath);

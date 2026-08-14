@@ -76,7 +76,11 @@ Vault notes carry YAML frontmatter and a leading `# H1`; the strip helper remove
 pi-steering-github strip <file>   # stripped body → stdout; the file is only read
 ```
 
-The `pi-steering-github` bin must be on the agent's `PATH` (the plugin's install links it). Direct `--body-file` vault paths are **blocked**, so a missing bin locks out both body-file rules — the shell fails on the substitution before `gh` even runs.
+The `pi-steering-github` bin must be on the agent's `PATH` (the plugin's install links it). Direct `--body-file` vault paths are **blocked**, so a missing bin locks out both body-file rules — the rules probe it with `command -v` on every body-file evaluation and block **fail-closed** with an install hint when it's absent (gh would read an empty substitution fd and fail at runtime anyway):
+
+```bash
+pnpm add -g @cad0p/pi-steering-github
+```
 
 The substitution is the ONLY accepted form for both PR and issue bodies, on create and edit:
 

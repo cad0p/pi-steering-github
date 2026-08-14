@@ -70,6 +70,8 @@ import type { Rule } from "@cad0p/pi-steering";
 import {
   bodyHasClosingKeyword,
   findFlagValue,
+  isStripHelperAvailable,
+  STRIP_HELPER_BIN,
 } from "./predicates/missing-vault-body-file.ts";
 
 // ---------------------------------------------------------------------------
@@ -166,11 +168,26 @@ export const prBodyFromVaultFile = {
   field: "command",
   pattern: PR_BODY_ANCHOR,
   when: { missingVaultBodyFile: { section: "prs" } },
-  reason:
-    `PR bodies must come from a body file in the napkin vault, uploaded through the ` +
-    `strip helper (removes frontmatter + H1):\n` +
-    `  gh pr create --title "..." --body-file ` +
-    `<(pi-steering-github strip <vault>/**/<repo>/prs/YYYY-MM-DD-pr<N>-<slug>.md)\n`,
+  reason: async (ctx) => {
+    if (!(await isStripHelperAvailable(ctx))) {
+      // The accepted substitution form cannot work without the
+      // helper on PATH — gh would read an empty fd. Teach the
+      // install command instead of the placement convention.
+      return (
+        `The strip helper (${STRIP_HELPER_BIN}) is not on PATH — install it, then retry:\n` +
+        `  pnpm add -g @cad0p/pi-steering-github\n` +
+        `then upload the body through the substitution:\n` +
+        `  gh pr create --title "..." --body-file ` +
+        `<(pi-steering-github strip <vault>/**/<repo>/prs/YYYY-MM-DD-pr<N>-<slug>.md)`
+      );
+    }
+    return (
+      `PR bodies must come from a body file in the napkin vault, uploaded through the ` +
+      `strip helper (removes frontmatter + H1):\n` +
+      `  gh pr create --title "..." --body-file ` +
+      `<(pi-steering-github strip <vault>/**/<repo>/prs/YYYY-MM-DD-pr<N>-<slug>.md)\n`
+    );
+  },
 } as const satisfies Rule;
 
 /**
@@ -246,13 +263,28 @@ export const issueBodyFromVaultFile = {
   field: "command",
   pattern: ISSUE_BODY_ANCHOR,
   when: { missingVaultBodyFile: { section: "issues" } },
-  reason:
-    `Issue bodies must come from a body file in the napkin vault, uploaded through the ` +
-    `strip helper (removes frontmatter + H1):\n` +
-    `  gh issue create --title "..." --body-file ` +
-    `<(pi-steering-github strip <vault>/**/<repo>/issues/YYYY-MM-DD-issue<N>-<slug>.md)\n` +
-    `- If foreign issue: cd to the repo you want to file the issue ` +
-    `and have a foreign subagent maintainer loop before filing`,
+  reason: async (ctx) => {
+    if (!(await isStripHelperAvailable(ctx))) {
+      // The accepted substitution form cannot work without the
+      // helper on PATH — gh would read an empty fd. Teach the
+      // install command instead of the placement convention.
+      return (
+        `The strip helper (${STRIP_HELPER_BIN}) is not on PATH — install it, then retry:\n` +
+        `  pnpm add -g @cad0p/pi-steering-github\n` +
+        `then upload the body through the substitution:\n` +
+        `  gh issue create --title "..." --body-file ` +
+        `<(pi-steering-github strip <vault>/**/<repo>/issues/YYYY-MM-DD-issue<N>-<slug>.md)`
+      );
+    }
+    return (
+      `Issue bodies must come from a body file in the napkin vault, uploaded through the ` +
+      `strip helper (removes frontmatter + H1):\n` +
+      `  gh issue create --title "..." --body-file ` +
+      `<(pi-steering-github strip <vault>/**/<repo>/issues/YYYY-MM-DD-issue<N>-<slug>.md)\n` +
+      `- If foreign issue: cd to the repo you want to file the issue ` +
+      `and have a foreign subagent maintainer loop before filing`
+    );
+  },
 } as const satisfies Rule;
 
 /**

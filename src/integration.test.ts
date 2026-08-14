@@ -133,6 +133,15 @@ function hostWithRemote(
           killed: false,
         } satisfies ExecResult);
       }
+      if (cmd === "sh" && args[0] === "-c" && args[1]?.startsWith("command -v ")) {
+        // Model the strip helper as on PATH (fail-closed otherwise).
+        return Promise.resolve({
+          stdout: "/usr/local/bin/pi-steering-github",
+          stderr: "",
+          code: 0,
+          killed: false,
+        } satisfies ExecResult);
+      }
       return Promise.resolve({
         stdout: "",
         stderr: "",
@@ -285,6 +294,51 @@ describe("github plugin — PR rules (issue-link + vault body-file policy)", () 
       makeFixtureDir(),
       `gh pr create --title "feat: x (closes #12)" --body-file "${fx.prBodyFile}"`,
       host,
+    );
+    assert.equal(block, true, "expected block");
+    assert.equal(rule, "pr-body-from-vault-file");
+  });
+
+  it("blocks when the strip helper is NOT on PATH (fail-closed install gate)", async () => {
+    // A valid substitution + valid vault path still blocks when
+    // `command -v pi-steering-github` fails — gh would read an empty
+    // fd at runtime. The dynamic reason teaches the install command.
+    const fx = makeVaultRepoFixture(repo);
+    const missingBinHost = createRecordingHost({
+      exec: (cmd, args) => {
+        if (cmd === "sh" && args[0] === "-c" && args[1]?.startsWith("command -v ")) {
+          return Promise.resolve({
+            stdout: "",
+            stderr: "",
+            code: 1,
+            killed: false,
+          } satisfies ExecResult);
+        }
+        if (
+          cmd === "git" &&
+          args[0] === "config" &&
+          args[1] === "--get" &&
+          args[2] === "remote.origin.url"
+        ) {
+          return Promise.resolve({
+            stdout: remote,
+            stderr: "",
+            code: 0,
+            killed: false,
+          } satisfies ExecResult);
+        }
+        return Promise.resolve({
+          stdout: "",
+          stderr: "",
+          code: 0,
+          killed: false,
+        } satisfies ExecResult);
+      },
+    });
+    const { block, rule } = await evaluateBash(
+      makeFixtureDir(),
+      `gh pr create --title "feat: x (closes #12)" --body-file ${stripSubstitution(fx.prBodyFile)}`,
+      missingBinHost,
     );
     assert.equal(block, true, "expected block");
     assert.equal(rule, "pr-body-from-vault-file");

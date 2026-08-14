@@ -25,10 +25,12 @@ import {
   bodyHasClosingKeyword,
   findBodyFileValue,
   findFlagValue,
+  isStripHelperAvailable,
   missingVaultBodyFile,
   parseBodyFileArg,
   repoName,
   resolveAgainstCwd,
+  STRIP_HELPER_BIN,
 } from "./missing-vault-body-file.ts";
 
 // ---------------------------------------------------------------------------
@@ -125,6 +127,10 @@ function originExec(remoteUrl: string): ExecStub {
       args[2] === "remote.origin.url"
     ) {
       return { stdout: remoteUrl, stderr: "", exitCode: 0 };
+    }
+    if (cmd === "sh" && args[0] === "-c" && args[1]?.startsWith("command -v ")) {
+      // Model the strip helper as on PATH (fail-closed otherwise).
+      return { stdout: "/usr/local/bin/pi-steering-github", stderr: "", exitCode: 0 };
     }
     return { stdout: "", stderr: "", exitCode: 0 };
   };
@@ -437,6 +443,59 @@ describe("repoName", () => {
 });
 
 // ---------------------------------------------------------------------------
+// isStripHelperAvailable
+// ---------------------------------------------------------------------------
+
+describe("isStripHelperAvailable", () => {
+  it("is true when command -v prints a path", async () => {
+    const ctx = makeCtx([], "/work/repo", async () => ({
+      stdout: "/usr/local/bin/pi-steering-github",
+      stderr: "",
+      exitCode: 0,
+    }));
+    assert.equal(await isStripHelperAvailable(ctx), true);
+  });
+
+  it("is false when command -v exits non-zero (not found)", async () => {
+    const ctx = makeCtx([], "/work/repo", async () => ({
+      stdout: "",
+      stderr: "",
+      exitCode: 1,
+    }));
+    assert.equal(await isStripHelperAvailable(ctx), false);
+  });
+
+  it("is false when command -v exits 0 but prints nothing (unverifiable)", async () => {
+    const ctx = makeCtx([], "/work/repo", async () => ({
+      stdout: "",
+      stderr: "",
+      exitCode: 0,
+    }));
+    assert.equal(await isStripHelperAvailable(ctx), false);
+  });
+
+  it("is false when the exec throws (fail-closed)", async () => {
+    const ctx = makeCtx([], "/work/repo", async () => {
+      throw new Error("exec unavailable");
+    });
+    assert.equal(await isStripHelperAvailable(ctx), false);
+  });
+
+  it("probes exactly `command -v ${STRIP_HELPER_BIN}`", async () => {
+    let probed: { cmd: string; args: string[] } | null = null;
+    const ctx = makeCtx([], "/work/repo", async (cmd, args) => {
+      probed = { cmd, args };
+      return { stdout: "/usr/local/bin/pi-steering-github", stderr: "", exitCode: 0 };
+    });
+    await isStripHelperAvailable(ctx);
+    assert.deepEqual(probed, {
+      cmd: "sh",
+      args: ["-c", `command -v ${STRIP_HELPER_BIN}`],
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // missingVaultBodyFile — predicate matrix
 // ---------------------------------------------------------------------------
 
@@ -456,6 +515,34 @@ describe("missingVaultBodyFile", () => {
         { text: stripSubstitution("/nonexistent/body.md") },
       ],
       "/work/repo",
+      originExec("https://github.com/cad0p/fixture-repo.git"),
+    );
+    assert.equal(await missingVaultBodyFile({ section: "prs" }, ctx), true);
+  });
+
+  it("fires when the strip helper is NOT on PATH (fail-closed install gate)", async () => {
+    const fx = makeVaultRepoFixture("fixture-repo");
+    const missingBin: ExecStub = async (cmd, args) => {
+      if (
+        cmd === "sh" &&
+        args[0] === "-c" &&
+        args[1]?.startsWith("command -v ")
+      ) {
+        return { stdout: "", stderr: "", exitCode: 1 };
+      }
+      if (
+        cmd === "git" &&
+        args[0] === "config" &&
+        args[1] === "--get"
+      ) {
+        return { stdout: "https://github.com/cad0p/fixture-repo.git", stderr: "", exitCode: 0 };
+      }
+      return { stdout: "", stderr: "", exitCode: 0 };
+    };
+    const ctx = makeCtx(
+      [{ text: "--body-file" }, { text: stripSubstitution(fx.prBodyFile) }],
+      fx.vault,
+      missingBin,
     );
     assert.equal(await missingVaultBodyFile({ section: "prs" }, ctx), true);
   });

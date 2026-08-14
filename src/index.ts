@@ -89,10 +89,12 @@ export {
   bodyHasClosingKeyword,
   findBodyFileValue,
   findFlagValue,
+  isStripHelperAvailable,
   missingVaultBodyFile,
   parseBodyFileArg,
   repoName,
   resolveAgainstCwd,
+  STRIP_HELPER_BIN,
   unquote,
 } from "./predicates/missing-vault-body-file.ts";
 // Named re-exports for consumers that want to pick pieces: the
