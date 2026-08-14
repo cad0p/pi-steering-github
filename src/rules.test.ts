@@ -206,3 +206,58 @@ describe("github plugin — pr-merge-needs-closing-keywords (normalized form)", 
     assert.equal(blocked(PR_MERGE_PATTERN, "gh pr merge --squash"), true);
   });
 });
+
+describe("github plugin — reason strings (byte-identity pins)", () => {
+  // The reason strings are byte-identical to the live global-config
+  // prototype (verified at ship time 2026-08-14 by an independent
+  // reviewer comparing both modules field-by-field). Agents in the
+  // wild receive these verbatim in block reasons, and the global
+  // config's integration tests match rule NAMES only — so these
+  // literals are the only CI pin keeping the full reason text from
+  // drifting. A future reword MUST update this test in the same
+  // commit (and ideally the goldmine changelog note).
+  it("pr-body-from-vault-file reason", () => {
+    assert.equal(
+      prBodyFromVaultFile.reason,
+      "PR bodies must come from a body file in the napkin vault — write it first, " +
+        "then reference it:\n" +
+        '  gh pr create --title "..." --body-file ' +
+        "<vault>/**/<repo>/prs/YYYY-MM-DD-pr<N>-<slug>.md\n",
+    );
+  });
+
+  it("pr-create-needs-issue-link reason", () => {
+    assert.equal(
+      prCreateNeedsIssueLink.reason,
+      "A PR must close at least one issue — put the closing keyword in BOTH the " +
+        "title and body:\n" +
+        '  e.g: title: "feat: x (closes #12)"; body: contains "Closes #12"\n' +
+        "- Title keyword: makes the issue(s) auto-close.\n" +
+        "- Body keyword: only links the issue(s) to the PR on a Title-Only squash merge.\n" +
+        '- Multiple issues: repeat the keyword per issue — "Closes #A, closes #B" — ' +
+        '"Closes #A #B" honors only the first number.',
+    );
+  });
+
+  it("pr-merge-needs-closing-keywords reason (known grammar quirk preserved)", () => {
+    assert.equal(
+      prMergeNeedsClosingKeywords.reason,
+      "Merging requires a closing keywords in the squash commit subject " +
+        "— every PR must close at least one issue:\n" +
+        '  gh pr merge --squash --subject "feat: x (closes #12)"\n' +
+        '- Repeat the keyword per issue — "Closes #A #B" honors only the first number.\n',
+    );
+  });
+
+  it("issue-body-from-vault-file reason (known <repo>/prs/ wording quirk preserved)", () => {
+    assert.equal(
+      issueBodyFromVaultFile.reason,
+      "Issue bodies must come from a body file in the napkin vault — write it first, " +
+        "then reference it:\n" +
+        '  gh issue create --title "..." --body-file ' +
+        "<vault>/**/<repo>/prs/YYYY-MM-DD-pr<N>-<slug>.md\n" +
+        "- If foreign issue: cd to the repo you want to file the issue " +
+        "and have a foreign subagent maintainer loop before filing",
+    );
+  });
+});
