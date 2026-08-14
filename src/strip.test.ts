@@ -9,7 +9,14 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import {
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Writable } from "node:stream";
@@ -235,5 +242,23 @@ describe("runCli", () => {
     assert.equal(runCli(["strip", "note.md", "extra"], io), 1);
     assert.equal(io.read("stdout"), "");
     assert.match(io.read("stderr"), /exactly one <file>/);
+  });
+
+  it("runs as the entry point when invoked via a symlink (pnpm/npm bin layout)", () => {
+    // Regression: the previous `import.meta.url === pathToFileURL(argv[1])`
+    // guard silently NO-OPs when cli.js is reached through a symlink —
+    // exactly how pnpm/npm .bin shims execute it. `import.meta.main`
+    // resolves the real path and stays true.
+    const dir = makeFixtureDir();
+    const link = join(dir, "pi-steering-github.mjs");
+    const target = new URL("./cli.ts", import.meta.url).pathname;
+    symlinkSync(target, link);
+    const res = spawnSync(
+      process.execPath,
+      ["--experimental-strip-types", link, "--help"],
+      { encoding: "utf8" },
+    );
+    assert.equal(res.status, 0, res.stderr);
+    assert.match(res.stdout, /Usage:/);
   });
 });

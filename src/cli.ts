@@ -19,7 +19,6 @@
  * only ever read — see `./strip.ts` for the stripping semantics).
  */
 
-import { pathToFileURL } from "node:url";
 import { stripVaultBodyFile } from "./strip.ts";
 
 const USAGE = `pi-steering-github — strip helper for vault body files
@@ -100,6 +99,6 @@ export function main(): void {
   process.exit(runCli(process.argv.slice(2)));
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
+if (import.meta.main) {
   main();
 }
