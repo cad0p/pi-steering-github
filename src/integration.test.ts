@@ -235,6 +235,7 @@ describe("github plugin — shape", () => {
         "pr-create-needs-issue-link",
         "pr-merge-needs-closing-keywords",
         "issue-body-from-vault-file",
+        "gh-repo-create-needs-seed",
       ],
     );
     for (const r of plugin?.rules ?? []) {
@@ -562,5 +563,50 @@ describe("github plugin — PR rules (issue-link + vault body-file policy)", () 
       host,
     );
     assert.equal(blockClose, false, `expected allow, got block by ${rule}`);
+  });
+});
+
+describe("github plugin — gh-repo-create-needs-seed (repo create must seed)", () => {
+  it("blocks bare gh repo create with the rule name in the reason tag", async () => {
+    const { block, rule } = await evaluateBash(
+      makeFixtureDir(),
+      "gh repo create cad0p/pi-config",
+    );
+    assert.equal(block, true, "expected block");
+    assert.equal(rule, "gh-repo-create-needs-seed");
+  });
+
+  it("blocks gh repo create with only non-seed flags (--source . --push)", async () => {
+    const { block, rule } = await evaluateBash(
+      makeFixtureDir(),
+      "gh repo create cad0p/pi-config --source . --push",
+    );
+    assert.equal(block, true, "expected block");
+    assert.equal(rule, "gh-repo-create-needs-seed");
+  });
+
+  it("blocks the gh repo new alias (new = create)", async () => {
+    const { block, rule } = await evaluateBash(
+      makeFixtureDir(),
+      "gh repo new cad0p/pi-config",
+    );
+    assert.equal(block, true, "expected block");
+    assert.equal(rule, "gh-repo-create-needs-seed");
+  });
+
+  it("allows gh repo create with --add-readme", async () => {
+    const { block, rule } = await evaluateBash(
+      makeFixtureDir(),
+      "gh repo create cad0p/pi-config --add-readme",
+    );
+    assert.equal(block, false, `expected allow, got block by ${rule}`);
+  });
+
+  it("allows gh repo create with --license mit", async () => {
+    const { block, rule } = await evaluateBash(
+      makeFixtureDir(),
+      "gh repo create cad0p/pi-config --license mit",
+    );
+    assert.equal(block, false, `expected allow, got block by ${rule}`);
   });
 });

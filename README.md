@@ -4,14 +4,17 @@ GitHub workflow rules for [pi-steering](https://github.com/cad0p/pi-steering): e
 
 ## What it ships
 
-One `Plugin` (`name: "github"`) with four rules and one predicate:
+One `Plugin` (`name: "github"`) with five rules and one predicate:
 
 | Rule | Fires on | Blocks when |
 | --- | --- | --- |
 | `pr-body-from-vault-file` | `gh pr create \| new \| edit` | the body doesn't come from `--body-file <(perl -0777 -pe '<BODY_STRIP>' <file>)` — a process substitution running the pinned perl one-liner (direct paths and inline `--body` are blocked) |
 | `pr-create-needs-issue-link` | `gh pr create \| new` | the `--title` value or the body lacks a closing keyword + `#N` |
 | `pr-merge-needs-closing-keywords` | `gh pr merge` | `--subject` or `--body` lacks a closing keyword + `#N` |
-| `issue-body-from-vault-file` | `gh issue create \| edit` | the body doesn't come from the same pinned perl substitution |
+
+| `issue-body-from-vault-file` | `gh issue create \| edit` | the body doesn't come from `--body-file` pointing at a `<repo>/issues/` napkin-vault file |
+| `gh-repo-create-needs-seed` | `gh repo create \| new` | no seed flag present (`--add-readme`, `--gitignore\|-g`, `--license\|-l`, `--template\|-p`) — a bare create births an EMPTY repo |
+>>>>>>> origin/main
 
 | Predicate | Purpose |
 | --- | --- |
@@ -89,6 +92,19 @@ The glued form `--body-file=<(...)` and the short `-F <(...)` form are accepted 
 
 `<( )` process substitution needs bash ≥ 4 (or zsh): the pi `bash` tool qualifies, as do Git Bash and WSL on Windows. Plain `sh` and Windows `cmd` do not.
 
+### `gh-repo-create-needs-seed`
+
+`gh repo create|new` must carry a seed flag — `--add-readme`, `--gitignore|-g <tpl>`, `--license|-l <kw>`, or `--template|-p <repo>` (long or short form, space or `=` value form). A bare create births an **EMPTY repo** (zero branches, zero commits): `main` can only be born by pushing past the `no-main-commit` gates — the steering-override dance, and the first content lands UNREVIEWED. The seeded flow sends the whole bootstrap through the normal pipeline:
+
+```bash
+gh repo create cad0p/<name> --add-readme
+# then: git fetch → git checkout -b feat/bootstrap origin/main → commit → push → PR → squash merge
+```
+
+The seed commit is the PR's base — the PR diff replaces it, so the first content is reviewed.
+
+Non-seed flags (`--source`, `--push`, `--clone`, `--description`, `--public|--private`, `--remote`, `--team`, …) do **not** exempt: `gh repo create x --source . --push` is blocked too — only a seed flag lets the command through. The rule is a form check (like the body-file rules); gh's own flag validation governs seed/`--source` combos at runtime.
+
 ## Predicate
 
 `when.missingVaultBodyFile` takes `{ section: "prs" | "issues" }` and returns `true` (rule blocks) when the command's `--body-file` value is missing or not the pinned `<(perl -0777 -pe '<BODY_STRIP>' <path>)` substitution form (direct paths, inline `--body`, wrong inner commands, extra or missing tokens). Fail-closed: anything unverifiable counts as missing. The `section` argument is carried for contract stability — the `<repo>/<section>/` placement is convention, taught by the rule reasons, and verified only at runtime by the substitution itself.
@@ -122,13 +138,15 @@ When the built-in predicate isn't enough, reach for the exported helpers inside 
 - `bodyHasClosingKeyword(ctx)` — does the body (stripped vault body-file content, or inline `--body`) carry a closing-keyword ref?
 - `unquote(text)` / `argText(ctx)` — low-level walker-word utilities.
 
-The pattern constants (`CLOSING_KEYWORD`, `ISSUE_REF`, `TITLE_WITH_REF`, `SUBJECT_WITH_REF`, `BODY_WITH_REF`, `PR_BODY_ANCHOR`, `PR_CREATE_ANCHOR`, `PR_MERGE_PATTERN`, `ISSUE_BODY_ANCHOR`) are exported too — they are what the rules ship, pinned by the unit tests.
+The pattern constants (`CLOSING_KEYWORD`, `ISSUE_REF`, `TITLE_WITH_REF`, `SUBJECT_WITH_REF`, `BODY_WITH_REF`, `PR_BODY_ANCHOR`, `PR_CREATE_ANCHOR`, `PR_MERGE_PATTERN`, `ISSUE_BODY_ANCHOR`, `REPO_CREATE_ANCHOR`, `REPO_CREATE_SEED_FLAG`, `REPO_CREATE_PATTERN`) are exported too — they are what the rules ship, pinned by the unit tests.
 
 ## Known limitations
 
 - **Inline `--body` is blocked** by the vault body-file rules by design — the file is the source of truth. If you need inline bodies, disable those rules.
 - **`--body-file` content is checked at eval time** by `pr-create-needs-issue-link` / `pr-merge-needs-closing-keywords`: the file must already contain the closing keyword when the command runs. `pr-merge-needs-closing-keywords` additionally has no `--body-file` support — merge commit messages must be passed explicitly via `--subject` / `--body`.
 - **Value-region truncation**: pattern matching runs on the walker-normalized command, and a flag's value region ends at the next `\s-` pair. A value containing a literal ` - ` (space-dash-space) truncates the region, so a closing-keyword ref after such a sequence may be missed (rule fires; add the keyword earlier in the value).
+- **Quoted-value false exemption (`gh-repo-create-needs-seed`)**: a seed-looking token inside a QUOTED flag value (e.g. `--description "see --license mit"`) falsely exempts the command — the token guard kills only GLUED lookalikes (`-local`, `foo--add-readme`), not space-separated tokens inside quoted values. Deliberately exploitable: an agent could embed a fake seed mention and still birth an empty repo. Accepted — same value-region class as the PR_* patterns; the walker contract is the plugin's foundation.
+- **`-R`-before-subcommand forms unanchored**: `gh -R x repo create` doesn't match the anchors — plugin-wide non-goal, same as the PR/issue rules.
 
 ## License
 
