@@ -265,8 +265,10 @@ export const prMergeNeedsClosingKeywords = {
  * note, uploaded through the same pinned perl substitution (create
  * and edit): `--body-file
  * <(perl -0777 -pe '<BODY_STRIP>' <vault-file>)`. Direct
- * paths (verbatim upload) and inline `--body` are blocked. FORM
- * check only. No keyword requirement (issues close nothing).
+ * paths (verbatim upload) and inline `--body` are blocked. The path
+ * argument is additionally validated (see `missingVaultBodyFile`):
+ * it must resolve to a real file inside a napkin vault under
+ * `<repo>/issues/`. No keyword requirement (issues close nothing).
  *
  * Strict — no override (schema default).
  */

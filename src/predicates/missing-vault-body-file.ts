@@ -344,7 +344,11 @@ export const missingVaultBodyFile: PredicateHandler<{
   // v0.1.0 via #12; the strip work dropped this validation).
   const abs = resolveAgainstCwd(ctx, parsed.path);
   if (abs === null) return true; // walker-unknown cwd → fail-closed
-  if (!existsSync(abs) || !statSync(abs).isFile()) return true;
+  try {
+    if (!existsSync(abs) || !statSync(abs).isFile()) return true;
+  } catch {
+    return true; // unreadable / raced-away path → fail-closed
+  }
   const vaultRoot = isNapkinVaultDir(dirname(abs));
   if (vaultRoot === null) return true; // outside any vault → missing
   // Repo = the origin of the git repo the COMMAND runs in (ctx.cwd),
