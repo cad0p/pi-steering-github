@@ -39,6 +39,14 @@
  *      `gh issue create|edit` must take the body from `--body-file`
  *      inside a napkin vault under a `<repo>/issues/` directory.
  *
+ *   5. `gh-repo-create-needs-seed`
+ *      `gh repo create|new` must carry a seed flag (`--add-readme`,
+ *      `--gitignore|-g`, `--license|-l`, `--template|-p`) — a bare
+ *      create births an EMPTY repo (no branches, no commits),
+ *      forcing the no-main-commit override dance and UNREVIEWED
+ *      first content; the seeded flow sends the whole bootstrap
+ *      through PRs.
+ *
  * Ported from the live prototype that ran in the global pi-steering
  * config; the prototype phase ended with the first live validation
  * (2026-08-14, pi-steering PR #46 session: create gate fired, agent
@@ -140,6 +148,27 @@ export const PR_MERGE_PATTERN = new RegExp(
 
 /** `issue-body-from-vault-file` anchor: issue create/edit. */
 export const ISSUE_BODY_ANCHOR = /^gh\s+issue\s+(?:create|edit)\b/i;
+
+/** `gh-repo-create-needs-seed` anchor: repo create/new (new is the gh alias). */
+export const REPO_CREATE_ANCHOR = /^gh\s+repo\s+(?:create|new)\b/i;
+
+/**
+ * A seed flag as its own token: long or short form, ` ` or `=`
+ * value forms. Token-boundary guarded — glued lookalikes
+ * (`foo--add-readme`, `-local`, `-public`) never match.
+ */
+export const REPO_CREATE_SEED_FLAG =
+  "(?:^|\\s)(?:--add-readme|--gitignore|-g|--license|-l|--template|-p)(?=$|\\s|=)";
+
+/**
+ * Fires unless a seed flag token appears anywhere in the command.
+ * Derived from `REPO_CREATE_ANCHOR` (its `source` + the `i` flag) so
+ * the anchor constant can never drift from the shipped pattern.
+ */
+export const REPO_CREATE_PATTERN = new RegExp(
+  `${REPO_CREATE_ANCHOR.source}(?![\\s\\S]*${REPO_CREATE_SEED_FLAG})`,
+  "i",
+);
 
 /**
  * `pr-body-from-vault-file` — PR bodies must come from a body file in
@@ -244,12 +273,48 @@ export const issueBodyFromVaultFile = {
 } as const satisfies Rule;
 
 /**
+ * `gh-repo-create-needs-seed` — `gh repo create|new` must carry a
+ * seed flag (`--add-readme`, `--gitignore|-g`, `--license|-l`,
+ * `--template|-p`, long or short form, ` ` or `=` value form). A
+ * bare create births an EMPTY repo (zero branches, zero commits):
+ * `main` can only be born by pushing past the `no-main-commit`
+ * gates — the steering-override dance and UNREVIEWED first content.
+ * The seeded flow sends the whole bootstrap through the normal
+ * pipeline (fetch → feature branch → commit → push → PR → squash
+ * merge); the seed commit is the PR's base, so the PR diff replaces
+ * it and the first content is reviewed.
+ *
+ * Known limitation (deliberate): a seed-looking token inside a
+ * QUOTED flag value (e.g. `--description "see --license mit"`)
+ * falsely exempts — the `(?:^|\s)` guard kills only GLUED
+ * lookalikes; same value-region class as the PR_* patterns, and the
+ * walker contract is the plugin's foundation.
+ *
+ * Strict — no override (schema default).
+ */
+export const ghRepoCreateNeedsSeed = {
+  name: "gh-repo-create-needs-seed",
+  tool: "bash",
+  field: "command",
+  pattern: REPO_CREATE_PATTERN,
+  reason:
+    "gh repo create must seed the repo — a bare create births an EMPTY repo (no branches, no commits), " +
+    "forcing UNREVIEWED first content. Use seed flags and seek explicit user approval for PR merge.\n" +
+    "  gh repo create cad0p/<name> --add-readme\n" +
+    "- Seed flags: --add-readme (recommended), --license <x>, --gitignore <x>, --template <repo>.\n" +
+    "- The seed commit is the PR's base — the PR diff replaces the README.",
+} as const satisfies Rule;
+
+/**
  * Suggested rules for the github plugin.
  *
  * **Order matters — first-match-wins** (the engine routes on the
  * first matching rule): `pr-body-from-vault-file` FIRST so the agent
  * writes the vault body file before fiddling with keywords, then the
- * issue-link rule, then merge, then the issue body-file rule.
+ * issue-link rule, then merge, then the issue body-file rule, then
+ * `gh-repo-create-needs-seed` LAST — appended, never reordered: its
+ * `^gh\s+repo\s` anchor cannot overlap the four `^gh\s+(?:pr|issue)\s`
+ * anchors, so first-match routing is unaffected.
  * Reordering for stylistic reasons changes which rule an agent sees
  * when several match; pinned via `src/rules.test.ts` (pattern
  * contracts) and asserted end-to-end in `src/integration.test.ts`.
@@ -259,4 +324,5 @@ export const rules = [
   prCreateNeedsIssueLink,
   prMergeNeedsClosingKeywords,
   issueBodyFromVaultFile,
+  ghRepoCreateNeedsSeed,
 ] as const satisfies readonly Rule[];

@@ -21,7 +21,7 @@
  *     constants, and the arg helpers re-exported for unit tests and
  *     `when.condition` escape-hatch use.
  *
- * The plugin ships four rules, all STRICT (no `noOverride: false` —
+ * The plugin ships five rules, all STRICT (no `noOverride: false` —
  * the schema defaults fail-closed, so the policy is unconditional):
  *
  *   - `pr-body-from-vault-file`      — PR bodies come from vault
@@ -32,6 +32,9 @@
  *                                      BOTH `--subject` and `--body`.
  *   - `issue-body-from-vault-file`   — issue bodies come from vault
  *                                      body files under `<repo>/issues/`.
+ *   - `gh-repo-create-needs-seed`    — `gh repo create|new` must
+ *                                      carry a seed flag; a bare
+ *                                      create births an EMPTY repo.
  *
  * See this package's README for usage examples and the per-rule
  * rationale, and the pi-steering README "Writing plugins" section for
@@ -74,7 +77,9 @@ declare global {
  * Rule order comes from `rules` (first-match-wins): the vault
  * body-file rule runs FIRST so the agent writes the body file before
  * fiddling with keywords, then the issue-link rule, then merge, then
- * the issue body-file rule. See `./rules.ts` for the rationale.
+ * the issue body-file rule, then `gh-repo-create-needs-seed` (no
+ * anchor overlap — `gh repo …` shares no prefix with the
+ * `gh pr|issue …` anchors). See `./rules.ts` for the rationale.
  */
 export const githubPlugin = {
   name: "github",
@@ -100,6 +105,7 @@ export {
 export {
   BODY_WITH_REF,
   CLOSING_KEYWORD,
+  ghRepoCreateNeedsSeed,
   ISSUE_BODY_ANCHOR,
   ISSUE_REF,
   issueBodyFromVaultFile,
@@ -109,6 +115,9 @@ export {
   prBodyFromVaultFile,
   prCreateNeedsIssueLink,
   prMergeNeedsClosingKeywords,
+  REPO_CREATE_ANCHOR,
+  REPO_CREATE_PATTERN,
+  REPO_CREATE_SEED_FLAG,
   rules,
   SUBJECT_WITH_REF,
   TITLE_WITH_REF,
