@@ -86,8 +86,8 @@ export default githubPlugin;
 
 export {
   argText,
+  BODY_STRIP,
   bodyHasClosingKeyword,
-  FRONTMATTER_STRIP,
   findBodyFileValue,
   findFlagValue,
   missingVaultBodyFile,

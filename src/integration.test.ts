@@ -38,7 +38,7 @@ import {
   mockExtensionContext,
 } from "@cad0p/pi-steering/testing";
 import type { ExecResult } from "@earendil-works/pi-coding-agent";
-import { FRONTMATTER_STRIP } from "./frontmatter-strip.ts";
+import { BODY_STRIP } from "./body-strip.ts";
 import { githubPlugin } from "./index.ts";
 
 const config = defineConfig({ plugins: [githubPlugin] });
@@ -104,16 +104,16 @@ afterEach(() => {
 
 /** The pinned perl substitution form the vault body-file rules require. */
 function stripSubstitution(file: string): string {
-  return `<(perl -0777 -pe '${FRONTMATTER_STRIP}' "${file}")`;
+  return `<(perl -0777 -pe '${BODY_STRIP}' "${file}")`;
 }
 
 /**
  * JS mirror of the pinned perl program (test stub only — the real
- * behavior is pinned by frontmatter-strip.test.ts spawning perl).
+ * behavior is pinned by body-strip.test.ts spawning perl).
  */
 function stripFrontmatter(content: string): string {
   return content.replace(
-    /^(?:\uFEFF)?---\r?\n(?:.*?\r?\n)?(?:---|\.\.\.)\r?\n(?:\r?\n)*/,
+    /^(?:\uFEFF)?---\r?\n(?:.*?\r?\n)?(?:---|\.\.\.)\r?\n(?:\r?\n)*(?:[ \t]*\r?\n)*(?:#(?![\S])[^\n]*(?:\r?\n)?(?:[ \t]*\r?\n)*)?/,
     "",
   );
 }

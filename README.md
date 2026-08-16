@@ -2,22 +2,20 @@
 
 GitHub workflow rules for [pi-steering](https://github.com/cad0p/pi-steering): every PR closes at least one issue; PR/issue bodies come from napkin vault body files.
 
-Ported from the live prototype that ran in the global pi-steering config (first live validation 2026-08-14, pi-steering PR #46 session: create gate fired, agent complied in 7s). Reason strings are byte-identical to the prototype for the keyword rules; the two body-file rules teach the pinned perl substitution convention (reworded when direct vault paths were blocked).
-
 ## What it ships
 
 One `Plugin` (`name: "github"`) with four rules and one predicate:
 
 | Rule | Fires on | Blocks when |
 | --- | --- | --- |
-| `pr-body-from-vault-file` | `gh pr create \| new \| edit` | the body doesn't come from `--body-file <(perl -0777 -pe '<FRONTMATTER_STRIP>' <file>)` — a process substitution running the pinned perl one-liner (direct paths and inline `--body` are blocked) |
+| `pr-body-from-vault-file` | `gh pr create \| new \| edit` | the body doesn't come from `--body-file <(perl -0777 -pe '<BODY_STRIP>' <file>)` — a process substitution running the pinned perl one-liner (direct paths and inline `--body` are blocked) |
 | `pr-create-needs-issue-link` | `gh pr create \| new` | the `--title` value or the body lacks a closing keyword + `#N` |
 | `pr-merge-needs-closing-keywords` | `gh pr merge` | `--subject` or `--body` lacks a closing keyword + `#N` |
 | `issue-body-from-vault-file` | `gh issue create \| edit` | the body doesn't come from the same pinned perl substitution |
 
 | Predicate | Purpose |
 | --- | --- |
-| `missingVaultBodyFile` | true when `--body-file` is absent or not the pinned `<(perl -0777 -pe '<FRONTMATTER_STRIP>' <file>)` substitution form (fail-closed form check; the path argument is not validated) |
+| `missingVaultBodyFile` | true when `--body-file` is absent or not the pinned `<(perl -0777 -pe '<BODY_STRIP>' <file>)` substitution form (fail-closed form check; the path argument is not validated) |
 
 All rules are **strict** — no `noOverride: false`, so there is no agent-side override escape hatch. The policy is unconditional.
 
@@ -47,7 +45,7 @@ Listing the plugin feeds its rule/predicate names into `defineConfig`'s type uni
 
 ### `pr-body-from-vault-file`
 
-`gh pr create|new|edit` must take the body from `--body-file <(perl -0777 -pe '<FRONTMATTER_STRIP>' <file>)` — a process substitution running the pinned perl one-liner, which strips the note's YAML frontmatter before `gh` uploads it. Direct paths upload the file **verbatim** (frontmatter renders on GitHub) and are blocked, like inline `--body`.
+`gh pr create|new|edit` must take the body from `--body-file <(perl -0777 -pe '<BODY_STRIP>' <file>)` — a process substitution running the pinned perl one-liner, which strips the note's YAML frontmatter before `gh` uploads it. Direct paths upload the file **verbatim** (frontmatter renders on GitHub) and are blocked, like inline `--body`.
 
 FORM check only — the file argument is not resolved or validated; the substitution is the runtime verifier (a bad path makes perl fail, gh reads an empty fd, and the agent self-corrects). The `<repo>/prs/` section convention is taught by the rule's reason. The closing-keyword content check belongs to `pr-create-needs-issue-link` (responsibility separation). Why vault body files: they are reviewable, persistent, and kb-discoverable — the body is written and reviewed *before* the command runs, so the PR description is a deliberate artifact rather than an inline afterthought.
 
@@ -66,7 +64,7 @@ FORM check only — the file argument is not resolved or validated; the substitu
 
 ### `issue-body-from-vault-file`
 
-`gh issue create|edit` must take the body from the same pinned perl substitution form (`--body-file <(perl -0777 -pe '<FRONTMATTER_STRIP>' <file>)`). No keyword requirement — issues close nothing.
+`gh issue create|edit` must take the body from the same pinned perl substitution form (`--body-file <(perl -0777 -pe '<BODY_STRIP>' <file>)`). No keyword requirement — issues close nothing.
 
 ### The pinned frontmatter-strip one-liner
 
@@ -81,19 +79,19 @@ The program is **byte-pinned** by the rule (the tokenizer compares the unquoted 
 The substitution is the ONLY accepted form for both PR and issue bodies, on create and edit:
 
 ```bash
-gh pr create --title "..." --body-file <(perl -0777 -pe '<FRONTMATTER_STRIP>' <vault>/**/<repo>/prs/2026-08-14-pr1-slug.md)
-gh pr edit 46 --body-file <(perl -0777 -pe '<FRONTMATTER_STRIP>' <vault>/**/<repo>/prs/2026-08-14-pr1-slug.md)
-gh issue create --title "..." --body-file <(perl -0777 -pe '<FRONTMATTER_STRIP>' <vault>/**/<repo>/issues/2026-08-14-issue1-slug.md)
-gh issue edit 29 --body-file <(perl -0777 -pe '<FRONTMATTER_STRIP>' <vault>/**/<repo>/issues/2026-08-14-issue1-slug.md)
+gh pr create --title "..." --body-file <(perl -0777 -pe '<BODY_STRIP>' <vault>/**/<repo>/prs/2026-08-14-pr1-slug.md)
+gh pr edit 46 --body-file <(perl -0777 -pe '<BODY_STRIP>' <vault>/**/<repo>/prs/2026-08-14-pr1-slug.md)
+gh issue create --title "..." --body-file <(perl -0777 -pe '<BODY_STRIP>' <vault>/**/<repo>/issues/2026-08-14-issue1-slug.md)
+gh issue edit 29 --body-file <(perl -0777 -pe '<BODY_STRIP>' <vault>/**/<repo>/issues/2026-08-14-issue1-slug.md)
 ```
 
-The glued form `--body-file=<(...)` and the short `-F <(...)` form are accepted too. The inner command is strict — only `perl -0777 -pe '<FRONTMATTER_STRIP>' <path>` parses (any other tool, program, or token arrangement fails closed).
+The glued form `--body-file=<(...)` and the short `-F <(...)` form are accepted too. The inner command is strict — only `perl -0777 -pe '<BODY_STRIP>' <path>` parses (any other tool, program, or token arrangement fails closed).
 
 `<( )` process substitution needs bash ≥ 4 (or zsh): the pi `bash` tool qualifies, as do Git Bash and WSL on Windows. Plain `sh` and Windows `cmd` do not.
 
 ## Predicate
 
-`when.missingVaultBodyFile` takes `{ section: "prs" | "issues" }` and returns `true` (rule blocks) when the command's `--body-file` value is missing or not the pinned `<(perl -0777 -pe '<FRONTMATTER_STRIP>' <path>)` substitution form (direct paths, inline `--body`, wrong inner commands, extra or missing tokens). Fail-closed: anything unverifiable counts as missing. The `section` argument is carried for contract stability — the `<repo>/<section>/` placement is convention, taught by the rule reasons, and verified only at runtime by the substitution itself.
+`when.missingVaultBodyFile` takes `{ section: "prs" | "issues" }` and returns `true` (rule blocks) when the command's `--body-file` value is missing or not the pinned `<(perl -0777 -pe '<BODY_STRIP>' <path>)` substitution form (direct paths, inline `--body`, wrong inner commands, extra or missing tokens). Fail-closed: anything unverifiable counts as missing. The `section` argument is carried for contract stability — the `<repo>/<section>/` placement is convention, taught by the rule reasons, and verified only at runtime by the substitution itself.
 
 ## Disabling
 

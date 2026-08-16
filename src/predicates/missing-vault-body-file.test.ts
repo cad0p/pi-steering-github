@@ -13,8 +13,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { PredicateContext } from "@cad0p/pi-steering";
 import {
+  BODY_STRIP,
   bodyHasClosingKeyword,
-  FRONTMATTER_STRIP,
   findBodyFileValue,
   findFlagValue,
   missingVaultBodyFile,
@@ -36,10 +36,10 @@ type ExecStub = (
 /**
  * Hand-built predicate ctx. `args` are walker words in `{ text }`
  * form (the shape `argText` reads); `exec` defaults to a stub that
- * answers `perl -0777 -pe <FRONTMATTER_STRIP> <file>` by reading the
+ * answers `perl -0777 -pe <BODY_STRIP> <file>` by reading the
  * file and stripping its frontmatter with the SAME pinned program
  * semantics (a JS mirror used only to keep these tests hermetic —
- * the real behavior is pinned by `frontmatter-strip.test.ts`, which
+ * the real behavior is pinned by `body-strip.test.ts`, which
  * spawns actual perl).
  */
 function makeCtx(
@@ -68,7 +68,7 @@ function makeCtx(
 
 /** The pinned substitution form the rules require. */
 function stripSubstitution(file: string): string {
-  return `<(perl -0777 -pe '${FRONTMATTER_STRIP}' ${file})`;
+  return `<(perl -0777 -pe '${BODY_STRIP}' ${file})`;
 }
 
 // ---------------------------------------------------------------------------
@@ -136,13 +136,13 @@ describe("findBodyFileValue", () => {
     const ctx = makeCtx(
       [
         { text: "--body-file=" },
-        { text: `<(perl -0777 -pe '${FRONTMATTER_STRIP}' /vault/prs/body.md)` },
+        { text: `<(perl -0777 -pe '${BODY_STRIP}' /vault/prs/body.md)` },
       ],
       "/work/repo",
     );
     assert.equal(
       findBodyFileValue(ctx),
-      `<(perl -0777 -pe '${FRONTMATTER_STRIP}' /vault/prs/body.md)`,
+      `<(perl -0777 -pe '${BODY_STRIP}' /vault/prs/body.md)`,
     );
   });
 
@@ -150,13 +150,13 @@ describe("findBodyFileValue", () => {
     const ctx = makeCtx(
       [
         { text: "-F=" },
-        { text: `<(perl -0777 -pe '${FRONTMATTER_STRIP}' /vault/prs/body.md)` },
+        { text: `<(perl -0777 -pe '${BODY_STRIP}' /vault/prs/body.md)` },
       ],
       "/work/repo",
     );
     assert.equal(
       findBodyFileValue(ctx),
-      `<(perl -0777 -pe '${FRONTMATTER_STRIP}' /vault/prs/body.md)`,
+      `<(perl -0777 -pe '${BODY_STRIP}' /vault/prs/body.md)`,
     );
   });
 
@@ -188,18 +188,14 @@ describe("findBodyFileValue", () => {
 describe("parseBodyFileArg", () => {
   it("parses the pinned perl substitution", () => {
     assert.deepEqual(
-      parseBodyFileArg(
-        `<(perl -0777 -pe '${FRONTMATTER_STRIP}' /vault/prs/note.md)`,
-      ),
+      parseBodyFileArg(`<(perl -0777 -pe '${BODY_STRIP}' /vault/prs/note.md)`),
       { kind: "substitution", path: "/vault/prs/note.md" },
     );
   });
 
   it("parses a double-quoted program (quote-agnostic pin)", () => {
     assert.deepEqual(
-      parseBodyFileArg(
-        `<(perl -0777 -pe "${FRONTMATTER_STRIP}" /vault/prs/note.md)`,
-      ),
+      parseBodyFileArg(`<(perl -0777 -pe "${BODY_STRIP}" /vault/prs/note.md)`),
       { kind: "substitution", path: "/vault/prs/note.md" },
     );
   });
@@ -207,7 +203,7 @@ describe("parseBodyFileArg", () => {
   it("parses a quoted path with spaces inside the substitution", () => {
     assert.deepEqual(
       parseBodyFileArg(
-        `<(perl -0777 -pe '${FRONTMATTER_STRIP}' "/vault/a b/note.md")`,
+        `<(perl -0777 -pe '${BODY_STRIP}' "/vault/a b/note.md")`,
       ),
       { kind: "substitution", path: "/vault/a b/note.md" },
     );
@@ -231,7 +227,7 @@ describe("parseBodyFileArg", () => {
 
   it("rejects missing perl flags", () => {
     assert.equal(
-      parseBodyFileArg(`<(perl -pe '${FRONTMATTER_STRIP}' /vault/prs/note.md)`),
+      parseBodyFileArg(`<(perl -pe '${BODY_STRIP}' /vault/prs/note.md)`),
       null,
     );
   });
@@ -239,24 +235,19 @@ describe("parseBodyFileArg", () => {
   it("rejects extra tokens after the path", () => {
     assert.equal(
       parseBodyFileArg(
-        `<(perl -0777 -pe '${FRONTMATTER_STRIP}' /vault/prs/note.md extra)`,
+        `<(perl -0777 -pe '${BODY_STRIP}' /vault/prs/note.md extra)`,
       ),
       null,
     );
   });
 
   it("rejects a missing path", () => {
-    assert.equal(
-      parseBodyFileArg(`<(perl -0777 -pe '${FRONTMATTER_STRIP}')`),
-      null,
-    );
+    assert.equal(parseBodyFileArg(`<(perl -0777 -pe '${BODY_STRIP}')`), null);
   });
 
   it("rejects an unclosed substitution", () => {
     assert.equal(
-      parseBodyFileArg(
-        `<(perl -0777 -pe '${FRONTMATTER_STRIP}' /vault/prs/note.md`,
-      ),
+      parseBodyFileArg(`<(perl -0777 -pe '${BODY_STRIP}' /vault/prs/note.md`),
       null,
     );
   });
@@ -305,7 +296,7 @@ describe("bodyHasClosingKeyword", () => {
   function perlExec(bodyAfterFrontmatter: string): ExecStub {
     return async (cmd, args) => {
       if (cmd === "perl" && args[0] === "-0777" && args[1] === "-pe") {
-        assert.equal(args[2], FRONTMATTER_STRIP, "pinned program must be used");
+        assert.equal(args[2], BODY_STRIP, "pinned program must be used");
         return {
           stdout: bodyAfterFrontmatter,
           stderr: "",
@@ -332,15 +323,6 @@ describe("bodyHasClosingKeyword", () => {
       perlExec("No keyword here.\n"),
     );
     assert.equal(await bodyHasClosingKeyword(ctx), false);
-  });
-
-  it("is true when the keyword appears in the H1 (H1 is kept — it is uploaded)", async () => {
-    const ctx = makeCtx(
-      [{ text: "--body-file" }, { text: stripSubstitution("/vault/note.md") }],
-      "/work/repo",
-      perlExec("# Closes #12\n\nBody.\n"),
-    );
-    assert.equal(await bodyHasClosingKeyword(ctx), true);
   });
 
   it("is false when perl fails (fail-closed)", async () => {
@@ -422,7 +404,7 @@ describe("missingVaultBodyFile", () => {
       [
         { text: "--body-file" },
         {
-          text: `<(perl -0777 -pe '${FRONTMATTER_STRIP}' "/vault/a b/note.md")`,
+          text: `<(perl -0777 -pe '${BODY_STRIP}' "/vault/a b/note.md")`,
         },
       ],
       "/work/repo",

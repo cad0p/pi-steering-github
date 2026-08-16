@@ -7,9 +7,9 @@
  * `issue-body-from-vault-file`).
  *
  * The ONLY accepted form for `--body-file` is a process substitution
- * running the pinned perl frontmatter-strip one-liner:
+ * running the pinned perl body-strip one-liner:
  *
- *   --body-file <(perl -0777 -pe '<FRONTMATTER_STRIP>' <vault-note>)
+ *   --body-file <(perl -0777 -pe '<BODY_STRIP>' <vault-note>)
  *
  * The one-liner removes the note's YAML frontmatter block before
  * `gh` uploads it, so GitHub bodies render clean while vault files
@@ -40,10 +40,10 @@
 import { readFileSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 import type { PredicateContext, PredicateHandler } from "@cad0p/pi-steering";
-import { FRONTMATTER_STRIP } from "../frontmatter-strip.ts";
+import { BODY_STRIP } from "../body-strip.ts";
 import { ISSUE_REF } from "../rules.ts";
 
-export { FRONTMATTER_STRIP };
+export { BODY_STRIP };
 
 // ---------------------------------------------------------------------------
 // The pinned strip one-liner — the only accepted inner command
@@ -54,7 +54,7 @@ export const STRIP_COMMAND_TOKENS: readonly string[] = [
   "perl",
   "-0777",
   "-pe",
-  FRONTMATTER_STRIP,
+  BODY_STRIP,
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -136,7 +136,7 @@ export function findBodyFileValue(ctx: PredicateContext): string {
 /**
  * A parsed `--body-file` value word:
  *
- *   - `substitution` — `<(perl -0777 -pe '<FRONTMATTER_STRIP>' <path>)`,
+ *   - `substitution` — `<(perl -0777 -pe '<BODY_STRIP>' <path>)`,
  *     the ONLY accepted form. `path` is the (unquoted) file argument
  *     — captured OPAQUE: the predicate does not resolve or validate
  *     it (runtime is the verifier).
@@ -153,7 +153,7 @@ export type BodyFileArg =
  * closed by the callers).
  *
  * A `<( … )` word is accepted ONLY when the inner command is exactly
- * `perl -0777 -pe <FRONTMATTER_STRIP> <path>` (shell word-split on
+ * `perl -0777 -pe <BODY_STRIP> <path>` (shell word-split on
  * the inner text, quotes respected and stripped): the program token
  * is byte-compared against the pinned constant, the path is the
  * single remaining token. Any other inner command (`sed`, `awk`,
@@ -258,7 +258,7 @@ export async function bodyHasClosingKeyword(
         const res = await ctx.exec("perl", [
           "-0777",
           "-pe",
-          FRONTMATTER_STRIP,
+          BODY_STRIP,
           parsed.path,
         ]);
         if (res.exitCode !== 0) return false;
@@ -284,7 +284,7 @@ export async function bodyHasClosingKeyword(
 /**
  * `missingVaultBodyFile` — fail-closed FORM check. True when the
  * command's `--body-file` value is missing, not the pinned
- * `<(perl -0777 -pe '<FRONTMATTER_STRIP>' <path>)` substitution, or
+ * `<(perl -0777 -pe '<BODY_STRIP>' <path>)` substitution, or
  * a direct path (uploaded verbatim — frontmatter renders on GitHub).
  * The path argument itself is NOT validated (form-only): the
  * substitution is the runtime verifier.

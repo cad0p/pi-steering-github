@@ -19,7 +19,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { FRONTMATTER_STRIP } from "./predicates/missing-vault-body-file.ts";
+import { BODY_STRIP } from "./predicates/missing-vault-body-file.ts";
 import {
   BODY_WITH_REF,
   CLOSING_KEYWORD,
@@ -213,7 +213,7 @@ describe("github plugin — reason strings (byte-identity pins)", () => {
   // global-config prototype (verified at ship time 2026-08-14 by an
   // independent reviewer comparing both modules field-by-field); the
   // two body-file rules were reworded in the pinned-perl work (issue
-  // #3) to teach the frontmatter-stripping substitution. Agents in
+  // #3) to teach the pinned perl body-strip substitution. Agents in
   // the wild receive these verbatim in block reasons, and the global
   // config's integration tests match rule NAMES only — so these
   // literals are the only CI pin keeping the full reason text from
@@ -222,10 +222,9 @@ describe("github plugin — reason strings (byte-identity pins)", () => {
   it("pr-body-from-vault-file reason", () => {
     assert.equal(
       prBodyFromVaultFile.reason,
-      "PR bodies must come from a vault note, uploaded through the frontmatter-stripping " +
-        "substitution (perl one-liner, pinned by the rule):\n" +
+      "PR bodies must come from a body file in the napkin vault:\n" +
         '  gh pr create --title "..." --body-file ' +
-        `<(perl -0777 -pe '${FRONTMATTER_STRIP}' ` +
+        `<(perl -0777 -pe '${BODY_STRIP}' ` +
         "<vault>/**/<repo>/prs/YYYY-MM-DD-pr<N>-<slug>.md)\n",
     );
   });
@@ -256,10 +255,9 @@ describe("github plugin — reason strings (byte-identity pins)", () => {
   it("issue-body-from-vault-file reason", () => {
     assert.equal(
       issueBodyFromVaultFile.reason,
-      "Issue bodies must come from a vault note, uploaded through the frontmatter-stripping " +
-        "substitution (perl one-liner, pinned by the rule):\n" +
+      "Issue bodies must come from a body file in the napkin vault:\n" +
         '  gh issue create --title "..." --body-file ' +
-        `<(perl -0777 -pe '${FRONTMATTER_STRIP}' ` +
+        `<(perl -0777 -pe '${BODY_STRIP}' ` +
         "<vault>/**/<repo>/issues/YYYY-MM-DD-issue<N>-<slug>.md)\n" +
         "- If foreign issue: cd to the repo you want to file the issue " +
         "and have a foreign subagent maintainer loop before filing",

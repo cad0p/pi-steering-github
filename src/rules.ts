@@ -10,7 +10,7 @@
  *
  *   1. `pr-body-from-vault-file` (FIRST — write the body first)
  *      `gh pr create|new|edit` must take the body from
- *      `--body-file <(perl -0777 -pe '<FRONTMATTER_STRIP>' <vault-file>)`
+ *      `--body-file <(perl -0777 -pe '<BODY_STRIP>' <vault-file>)`
  *      — a process substitution running the pinned perl one-liner
  *      (removes the note's YAML frontmatter before `gh` uploads it;
  *      the H1 stays). Direct paths upload verbatim and are blocked,
@@ -65,7 +65,7 @@
  */
 
 import type { Rule } from "@cad0p/pi-steering";
-import { FRONTMATTER_STRIP } from "./frontmatter-strip.ts";
+import { BODY_STRIP } from "./body-strip.ts";
 import {
   bodyHasClosingKeyword,
   findFlagValue,
@@ -149,7 +149,7 @@ export const ISSUE_BODY_ANCHOR = /^gh\s+issue\s+(?:create|edit)\b/i;
 /**
  * `pr-body-from-vault-file` — PR bodies must come from a vault note,
  * uploaded through the pinned perl substitution (create, new, and
- * edit): `--body-file <(perl -0777 -pe '<FRONTMATTER_STRIP>' <vault-file>)`
+ * edit): `--body-file <(perl -0777 -pe '<BODY_STRIP>' <vault-file>)`
  * — the one-liner strips the YAML frontmatter before `gh` uploads
  * the content (the H1 stays). Direct paths (verbatim upload) and
  * inline `--body` are blocked. FORM check only — the path argument
@@ -165,10 +165,9 @@ export const prBodyFromVaultFile = {
   pattern: PR_BODY_ANCHOR,
   when: { missingVaultBodyFile: { section: "prs" } },
   reason:
-    `PR bodies must come from a vault note, uploaded through the frontmatter-stripping ` +
-    `substitution (perl one-liner, pinned by the rule):\n` +
+    `PR bodies must come from a body file in the napkin vault:\n` +
     `  gh pr create --title "..." --body-file ` +
-    `<(perl -0777 -pe '${FRONTMATTER_STRIP}' ` +
+    `<(perl -0777 -pe '${BODY_STRIP}' ` +
     `<vault>/**/<repo>/prs/YYYY-MM-DD-pr<N>-<slug>.md)\n`,
 } as const satisfies Rule;
 
@@ -232,7 +231,7 @@ export const prMergeNeedsClosingKeywords = {
  * `issue-body-from-vault-file` — issue bodies must come from a vault
  * note, uploaded through the same pinned perl substitution (create
  * and edit): `--body-file
- * <(perl -0777 -pe '<FRONTMATTER_STRIP>' <vault-file>)`. Direct
+ * <(perl -0777 -pe '<BODY_STRIP>' <vault-file>)`. Direct
  * paths (verbatim upload) and inline `--body` are blocked. FORM
  * check only. No keyword requirement (issues close nothing).
  *
@@ -245,10 +244,9 @@ export const issueBodyFromVaultFile = {
   pattern: ISSUE_BODY_ANCHOR,
   when: { missingVaultBodyFile: { section: "issues" } },
   reason:
-    `Issue bodies must come from a vault note, uploaded through the frontmatter-stripping ` +
-    `substitution (perl one-liner, pinned by the rule):\n` +
+    `Issue bodies must come from a body file in the napkin vault:\n` +
     `  gh issue create --title "..." --body-file ` +
-    `<(perl -0777 -pe '${FRONTMATTER_STRIP}' ` +
+    `<(perl -0777 -pe '${BODY_STRIP}' ` +
     `<vault>/**/<repo>/issues/YYYY-MM-DD-issue<N>-<slug>.md)\n` +
     `- If foreign issue: cd to the repo you want to file the issue ` +
     `and have a foreign subagent maintainer loop before filing`,
