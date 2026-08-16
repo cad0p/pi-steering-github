@@ -8,6 +8,10 @@ All notable changes to this project will be documented in this file.
 <!-- Add your curated release notes here. -->
 <!-- USER-EDITABLE SECTION END -->
 
+### 🚀 Features
+
+- Gh repo create must seed the repo — bootstraps go through PRs (closes #7)
+
 ### 🐛 Bug Fixes
 
 - Correct reason-string quirks — issues/ path hint + merge grammar (closes #4)
