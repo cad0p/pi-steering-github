@@ -235,8 +235,8 @@ export function resolveAgainstCwd(
  *
  * - substitution form: runs the pinned perl one-liner via `ctx.exec`
  *   and tests its OUTPUT — the canonical input is exactly what gh
- *   uploads (frontmatter stripped; the H1 is kept, so an H1 keyword
- *   counts; a frontmatter-only keyword does not).
+ *   uploads (frontmatter and the leading H1 stripped, so a keyword
+ *   that only appears in the frontmatter or the H1 does not count).
  * - direct path / inline `--body`: raw content fallbacks for
  *   configs that disable the body-file rules (documented README
  *   combo).

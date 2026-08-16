@@ -12,8 +12,9 @@
  *      `gh pr create|new|edit` must take the body from
  *      `--body-file <(perl -0777 -pe '<BODY_STRIP>' <vault-file>)`
  *      — a process substitution running the pinned perl one-liner
- *      (removes the note's YAML frontmatter before `gh` uploads it;
- *      the H1 stays). Direct paths upload verbatim and are blocked,
+ *      (removes the note's YAML frontmatter and the leading H1 — the
+ *      note title, redundant under the gh PR title — before `gh`
+ *      uploads it). Direct paths upload verbatim and are blocked,
  *      like inline `--body`. FORM check only — the path argument is
  *      not validated (the substitution is the runtime verifier).
  *
@@ -179,8 +180,9 @@ export const REPO_CREATE_PATTERN = new RegExp(
  * `pr-body-from-vault-file` — PR bodies must come from a vault note,
  * uploaded through the pinned perl substitution (create, new, and
  * edit): `--body-file <(perl -0777 -pe '<BODY_STRIP>' <vault-file>)`
- * — the one-liner strips the YAML frontmatter before `gh` uploads
- * the content (the H1 stays). Direct paths (verbatim upload) and
+ * — the one-liner strips the YAML frontmatter and the leading H1
+ * (the note title, redundant under the gh PR title) before `gh`
+ * uploads the content. Direct paths (verbatim upload) and
  * inline `--body` are blocked. FORM check only — the path argument
  * is not validated; the substitution is the runtime verifier. The
  * closing-keyword content check belongs to `pr-create-needs-issue-link`.
