@@ -302,7 +302,7 @@ export const ghRepoCreateNeedsSeed = {
     "forcing UNREVIEWED first content. Use seed flags and seek explicit user approval for PR merge.\n" +
     "  gh repo create cad0p/<name> --add-readme\n" +
     "- Seed flags: --add-readme (recommended), --license <x>, --gitignore <x>, --template <repo>.\n" +
-    "- The seed commit is the PR's base — the PR diff replaces it.",
+    "- The seed commit is the PR's base — the PR diff replaces the README.",
 } as const satisfies Rule;
 
 /**
