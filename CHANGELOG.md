@@ -17,6 +17,7 @@ All notable changes to this project will be documented in this file.
 
 - Correct reason-string quirks — issues/ path hint + merge grammar (closes #4)
 - Restore vault path validation in missingVaultBodyFile (closes #12)
+- *(rules)* Merge gate requires the closing keyword in --subject only (closes #15)
 
 ### 📚 Documentation
 
