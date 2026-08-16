@@ -11,6 +11,7 @@ All notable changes to this project will be documented in this file.
 ### 🚀 Features
 
 - Gh repo create must seed the repo — bootstraps go through PRs (closes #7)
+- Strip frontmatter and heading from vault body files on gh upload (closes #3)
 
 ### 🐛 Bug Fixes
 
