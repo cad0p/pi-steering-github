@@ -3,14 +3,20 @@
 
 /**
  * Unit tests for the `missingVaultBodyFile` predicate and its arg
- * helpers. The predicate is a pure FORM check (no filesystem
- * walking, no path validation), so these tests are pure command-
- * string tests with hand-built ctx objects; `bodyHasClosingKeyword`
- * execs the pinned perl one-liner through a stubbed exec.
+ * helpers. The predicate is a FORM check PLUS a vault-path
+ * validation (restored in #12): it walks the REAL filesystem
+ * (napkin-vault detection via `.napkin/` / `.obsidian/.napkin/`
+ * markers, repo-name via the exec stub), so the substitution-form
+ * tests use real fixture dirs (mkdtemp) like the integration suite;
+ * `bodyHasClosingKeyword` execs the pinned perl one-liner through a
+ * stubbed exec.
  */
 
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { afterEach, describe, it } from "node:test";
 import type { PredicateContext } from "@cad0p/pi-steering";
 import {
   BODY_STRIP,
@@ -65,6 +71,69 @@ function makeCtx(
   };
   return ctx as unknown as PredicateContext;
 }
+
+// ---------------------------------------------------------------------------
+// Real vault fixtures (the restored validation walks the filesystem)
+// ---------------------------------------------------------------------------
+
+const fixtures: string[] = [];
+
+function makeFixtureDir(): string {
+  const dir = mkdtempSync(join(tmpdir(), "github-plugin-pred-test-"));
+  fixtures.push(dir);
+  return dir;
+}
+
+function makeVaultDir(): string {
+  const dir = makeFixtureDir();
+  mkdirSync(join(dir, ".napkin"));
+  return dir;
+}
+
+/**
+ * A napkin-vault fixture laid out like the real Goldmine convention:
+ * `<vault>/open-source/github/<repo>/prs|issues/<date>-pr|issue<N>-<slug>.md`.
+ */
+interface VaultRepoFixture {
+  vault: string;
+  repo: string;
+  prBodyFile: string;
+  issueBodyFile: string;
+}
+
+function makeVaultRepoFixture(repo: string): VaultRepoFixture {
+  const vault = makeVaultDir();
+  const prsDir = join(vault, "open-source", "github", repo, "prs");
+  const issuesDir = join(vault, "open-source", "github", repo, "issues");
+  mkdirSync(prsDir, { recursive: true });
+  mkdirSync(issuesDir, { recursive: true });
+  const prBodyFile = join(prsDir, `2026-08-14-pr1-${repo}-test.md`);
+  writeFileSync(prBodyFile, "Closes #12\n\n## What\n\nBody text.\n");
+  const issueBodyFile = join(issuesDir, `2026-08-14-issue1-${repo}-test.md`);
+  writeFileSync(issueBodyFile, "## What\n\nIssue body text.\n");
+  return { vault, repo, prBodyFile, issueBodyFile };
+}
+
+/** Exec stub answering `git config --get remote.origin.url`. */
+function gitRemoteExec(remoteUrl: string): ExecStub {
+  return async (cmd, args) => {
+    if (
+      cmd === "git" &&
+      args[0] === "config" &&
+      args[1] === "--get" &&
+      args[2] === "remote.origin.url"
+    ) {
+      return { stdout: remoteUrl, stderr: "", exitCode: 0 };
+    }
+    return { stdout: "", stderr: "", exitCode: 1 };
+  };
+}
+
+afterEach(() => {
+  for (const dir of fixtures.splice(0)) {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 /** The pinned substitution form the rules require. */
 function stripSubstitution(file: string): string {
@@ -375,46 +444,61 @@ describe("missingVaultBodyFile", () => {
     assert.equal(await missingVaultBodyFile({ section: "prs" }, ctx), true);
   });
 
-  it("does NOT fire for the pinned perl substitution", async () => {
+  it("does NOT fire for the pinned perl substitution (valid vault prs/ file)", async () => {
+    const fx = makeVaultRepoFixture("fixture-repo");
     const ctx = makeCtx(
-      [{ text: "--body-file" }, { text: stripSubstitution("/vault/note.md") }],
-      "/work/repo",
+      [
+        { text: "--body-file" },
+        { text: stripSubstitution(`"${fx.prBodyFile}"`) },
+      ],
+      fx.vault,
+      gitRemoteExec("https://github.com/cad0p/fixture-repo.git"),
     );
     assert.equal(await missingVaultBodyFile({ section: "prs" }, ctx), false);
   });
 
   it("does NOT fire for the glued --body-file=<(…) form (walker-split into two words)", async () => {
+    const fx = makeVaultRepoFixture("fixture-repo");
     const ctx = makeCtx(
-      [{ text: "--body-file=" }, { text: stripSubstitution("/vault/note.md") }],
-      "/work/repo",
+      [
+        { text: "--body-file=" },
+        { text: stripSubstitution(`"${fx.prBodyFile}"`) },
+      ],
+      fx.vault,
+      gitRemoteExec("https://github.com/cad0p/fixture-repo.git"),
     );
     assert.equal(await missingVaultBodyFile({ section: "prs" }, ctx), false);
   });
 
   it("does NOT fire for the short -F <(…) form", async () => {
+    const fx = makeVaultRepoFixture("fixture-repo");
     const ctx = makeCtx(
-      [{ text: "-F" }, { text: stripSubstitution("/vault/note.md") }],
-      "/work/repo",
+      [{ text: "-F" }, { text: stripSubstitution(`"${fx.prBodyFile}"`) }],
+      fx.vault,
+      gitRemoteExec("https://github.com/cad0p/fixture-repo.git"),
     );
     assert.equal(await missingVaultBodyFile({ section: "prs" }, ctx), false);
   });
 
   it("does NOT fire with a quoted path inside the substitution", async () => {
+    const fx = makeVaultRepoFixture("fixture-repo");
+    const spacedFile = join(dirname(fx.prBodyFile), "2026-08-14-pr2-a b.md");
+    writeFileSync(spacedFile, "Closes #12\n");
     const ctx = makeCtx(
       [
         { text: "--body-file" },
-        {
-          text: `<(perl -0777 -pe '${BODY_STRIP}' "/vault/a b/note.md")`,
-        },
+        { text: `<(perl -0777 -pe '${BODY_STRIP}' "${spacedFile}")` },
       ],
-      "/work/repo",
+      fx.vault,
+      gitRemoteExec("https://github.com/cad0p/fixture-repo.git"),
     );
     assert.equal(await missingVaultBodyFile({ section: "prs" }, ctx), false);
   });
 
-  it("does NOT fire when the path is bogus (form-only — runtime verifies)", async () => {
-    // The predicate is a FORM check: a nonexistent path passes the
-    // gate by design; perl fails at runtime and the agent corrects.
+  it("fires when the path is bogus (nonexistent — fail-closed)", async () => {
+    // Form OK but the path must resolve to a real file inside a
+    // napkin vault under <repo>/<section>/ (restored validation,
+    // #12 — the strip work briefly allowed bogus paths).
     const ctx = makeCtx(
       [
         { text: "--body-file" },
@@ -422,7 +506,7 @@ describe("missingVaultBodyFile", () => {
       ],
       "/work/repo",
     );
-    assert.equal(await missingVaultBodyFile({ section: "prs" }, ctx), false);
+    assert.equal(await missingVaultBodyFile({ section: "prs" }, ctx), true);
   });
 
   it("fires for a DIRECT path (verbatim upload — only the substitution is accepted)", async () => {

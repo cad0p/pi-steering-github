@@ -2,8 +2,8 @@
 // Part of pi-steering-github.
 
 /**
- * `when.missingVaultBodyFile` — fail-closed form check backing the
- * two body-file rules (`pr-body-from-vault-file` /
+ * `when.missingVaultBodyFile` — fail-closed form + vault-path check
+ * backing the two body-file rules (`pr-body-from-vault-file` /
  * `issue-body-from-vault-file`).
  *
  * The ONLY accepted form for `--body-file` is a process substitution
@@ -13,23 +13,24 @@
  *
  * The one-liner removes the note's YAML frontmatter block before
  * `gh` uploads it, so GitHub bodies render clean while vault files
- * stay byte-identical (nothing writes them). The predicate is a pure
- * FORM check — it does no path validation and no content
- * transformation: the `<vault-note>` argument is captured opaque and
- * verified only at runtime by the substitution itself (a bad path
- * makes perl fail → gh reads an empty fd → the agent self-corrects,
- * the same feedback model as kb_read).
+ * stay byte-identical (nothing writes them). The predicate is a
+ * FORM check PLUS a vault-path validation (restored in #12 — the
+ * strip work 0.1.0-20260816.2 dropped the validation): the
+ * `<vault-note>` argument must resolve to a real file inside a
+ * napkin vault, under a `<repo>/<section>/` directory (`<repo>` =
+ * origin URL basename, cwd-folder fallback).
  *
  * The predicate is true (rule fires) when the `--body-file` value is
- * missing, not the substitution form, or the inner command deviates
- * from the pinned token sequence. Fail-closed: anything unverifiable
- * counts as missing.
+ * missing, not the substitution form, the inner command deviates
+ * from the pinned token sequence, OR the path fails the vault check
+ * (nonexistent, outside a vault, wrong section, wrong repo,
+ * walker-unknown cwd). Fail-closed: anything unverifiable counts as
+ * missing.
  *
  * Args:
  *
- *   - `section: "prs" | "issues"` — carried for contract stability
- *     (the section convention is taught by the rule reasons; it is
- *     NOT enforced here).
+ *   - `section: "prs" | "issues"` — the vault-relative directory the
+ *     body file must live under.
  *
  * This module also exports the arg helpers (`findFlagValue`,
  * `findBodyFileValue`, `parseBodyFileArg`, `resolveAgainstCwd`,
@@ -37,8 +38,16 @@
  * for unit tests and `when.condition` escape-hatch use.
  */
 
-import { readFileSync } from "node:fs";
-import { isAbsolute, resolve } from "node:path";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  relative,
+  resolve,
+  sep,
+} from "node:path";
+import { isNapkinVaultDir } from "@cad0p/pi-napkin/steering";
 import type { PredicateContext, PredicateHandler } from "@cad0p/pi-steering";
 import { BODY_STRIP } from "../body-strip.ts";
 import { ISSUE_REF } from "../rules.ts";
@@ -138,8 +147,8 @@ export function findBodyFileValue(ctx: PredicateContext): string {
  *
  *   - `substitution` — `<(perl -0777 -pe '<BODY_STRIP>' <path>)`,
  *     the ONLY accepted form. `path` is the (unquoted) file argument
- *     — captured OPAQUE: the predicate does not resolve or validate
- *     it (runtime is the verifier).
+ *     — resolved and validated by `missingVaultBodyFile` (exists,
+ *     napkin vault, `<repo>/<section>/` placement).
  *   - `direct` — any other path-like word (blocked; kept only so
  *     `bodyHasClosingKeyword` can raw-read a direct path in the
  *     disabled-rules combos).
@@ -282,16 +291,46 @@ export async function bodyHasClosingKeyword(
 }
 
 /**
- * `missingVaultBodyFile` — fail-closed FORM check. True when the
- * command's `--body-file` value is missing, not the pinned
- * `<(perl -0777 -pe '<BODY_STRIP>' <path>)` substitution, or
- * a direct path (uploaded verbatim — frontmatter renders on GitHub).
- * The path argument itself is NOT validated (form-only): the
- * substitution is the runtime verifier.
+ * Repository name: origin URL basename (`git config --get
+ * remote.origin.url`, `.git` suffix stripped); falls back to the cwd
+ * folder name when the remote is unresolvable (user decision
+ * 2026-08-14). `null` only when both fail — caller treats as missing.
+ */
+export async function repoName(
+  ctx: PredicateContext,
+  cwd: string,
+): Promise<string | null> {
+  try {
+    const res = await ctx.exec(
+      "git",
+      ["config", "--get", "remote.origin.url"],
+      { cwd },
+    );
+    const url = res.stdout?.trim() ?? "";
+    if (res.exitCode === 0 && url !== "") {
+      const name = basename(url).replace(/\.git$/, "");
+      if (name !== "") return name;
+    }
+  } catch {
+    // fall through to the cwd-basename fallback
+  }
+  const name = basename(cwd);
+  return name !== "" ? name : null;
+}
+
+/**
+ * `missingVaultBodyFile` — fail-closed form + vault-path check. True
+ * when the command's `--body-file` value is missing, not the pinned
+ * `<(perl -0777 -pe '<BODY_STRIP>' <path>)` substitution, or a
+ * direct path (uploaded verbatim — frontmatter renders on GitHub);
+ * and — for a valid substitution — when the path fails the vault
+ * check (nonexistent, outside a napkin vault, or not under a
+ * `<repo>/<section>/` directory). Fail-closed: anything unverifiable
+ * counts as missing.
  */
 export const missingVaultBodyFile: PredicateHandler<{
   section: "prs" | "issues";
-}> = async (_args, ctx) => {
+}> = async (args, ctx) => {
   const value = findBodyFileValue(ctx);
   if (value === "") return true; // no body file at all → missing
   const parsed = parseBodyFileArg(value);
@@ -301,5 +340,24 @@ export const missingVaultBodyFile: PredicateHandler<{
     // renders on GitHub) — only the pinned substitution is accepted.
     return true;
   }
-  return false;
+  // Substitution form OK — validate the vault path (restored from
+  // v0.1.0 via #12; the strip work dropped this validation).
+  const abs = resolveAgainstCwd(ctx, parsed.path);
+  if (abs === null) return true; // walker-unknown cwd → fail-closed
+  if (!existsSync(abs) || !statSync(abs).isFile()) return true;
+  const vaultRoot = isNapkinVaultDir(dirname(abs));
+  if (vaultRoot === null) return true; // outside any vault → missing
+  // Repo = the origin of the git repo the COMMAND runs in (ctx.cwd),
+  // not the body file's dir: the file lives in the shared vault
+  // (Goldmine), whose own origin is the vault repo — dirname(abs)
+  // would always resolve to the vault's name.
+  const repo = await repoName(ctx, ctx.cwd);
+  if (repo === null) return true;
+  // Vault-relative path must contain <repo>/<section>/ (any depth —
+  // e.g. open-source/github/<repo>/prs/… or personal/github/<repo>/prs/…).
+  const segments = relative(vaultRoot, abs)
+    .split(sep)
+    .filter((s) => s !== "");
+  const repoIndex = segments.indexOf(repo);
+  return !(repoIndex !== -1 && segments[repoIndex + 1] === args.section);
 };

@@ -15,8 +15,9 @@
  *      (removes the note's YAML frontmatter and the leading H1 — the
  *      note title, redundant under the gh PR title — before `gh`
  *      uploads it). Direct paths upload verbatim and are blocked,
- *      like inline `--body`. FORM check only — the path argument is
- *      not validated (the substitution is the runtime verifier).
+ *      like inline `--body`. The path argument is additionally
+ *      validated: it must resolve to a real file inside a napkin
+ *      vault under `<repo>/prs/` (see `missingVaultBodyFile`).
  *
  *   2. `pr-create-needs-issue-link`
  *      `gh pr create|new` must carry a closing keyword
@@ -183,8 +184,9 @@ export const REPO_CREATE_PATTERN = new RegExp(
  * — the one-liner strips the YAML frontmatter and the leading H1
  * (the note title, redundant under the gh PR title) before `gh`
  * uploads the content. Direct paths (verbatim upload) and
- * inline `--body` are blocked. FORM check only — the path argument
- * is not validated; the substitution is the runtime verifier. The
+ * inline `--body` are blocked. The path argument is additionally
+ * validated (see `missingVaultBodyFile`): it must resolve to a real
+ * file inside a napkin vault under `<repo>/prs/`. The
  * closing-keyword content check belongs to `pr-create-needs-issue-link`.
  *
  * Strict — no override (schema default).

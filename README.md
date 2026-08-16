@@ -18,7 +18,7 @@ One `Plugin` (`name: "github"`) with five rules and one predicate:
 
 | Predicate | Purpose |
 | --- | --- |
-| `missingVaultBodyFile` | true when `--body-file` is absent or not the pinned `<(perl -0777 -pe '<BODY_STRIP>' <file>)` substitution form (fail-closed form check; the path argument is not validated) |
+| `missingVaultBodyFile` | true when `--body-file` is absent, not the pinned `<(perl -0777 -pe '<BODY_STRIP>' <file>)` substitution form, or the path fails the vault check (nonexistent, outside a napkin vault, not under `<repo>/<section>/`) |
 
 All rules are **strict** — no `noOverride: false`, so there is no agent-side override escape hatch. The policy is unconditional.
 
@@ -50,7 +50,7 @@ Listing the plugin feeds its rule/predicate names into `defineConfig`'s type uni
 
 `gh pr create|new|edit` must take the body from `--body-file <(perl -0777 -pe '<BODY_STRIP>' <file>)` — a process substitution running the pinned perl one-liner, which strips the note's YAML frontmatter before `gh` uploads it. Direct paths upload the file **verbatim** (frontmatter renders on GitHub) and are blocked, like inline `--body`.
 
-FORM check only — the file argument is not resolved or validated; the substitution is the runtime verifier (a bad path makes perl fail, gh reads an empty fd, and the agent self-corrects). The `<repo>/prs/` section convention is taught by the rule's reason. The closing-keyword content check belongs to `pr-create-needs-issue-link` (responsibility separation). Why vault body files: they are reviewable, persistent, and kb-discoverable — the body is written and reviewed *before* the command runs, so the PR description is a deliberate artifact rather than an inline afterthought.
+FORM + vault-path check — the substitution must be the pinned form AND the file argument must resolve to a real file inside a napkin vault, under a `<repo>/<section>/` directory (`<repo>` = origin URL basename, cwd-folder fallback). Fail-closed: anything unverifiable (missing flag, unparsable form, walker-unknown cwd, nonexistent path, outside a vault, wrong section/repo) counts as missing. The `<repo>/<section>/` convention is both taught by the rule's reason and enforced here. The closing-keyword content check belongs to `pr-create-needs-issue-link` (responsibility separation). Why vault body files: they are reviewable, persistent, and kb-discoverable — the body is written and reviewed *before* the command runs, so the PR description is a deliberate artifact rather than an inline afterthought.
 
 ### `pr-create-needs-issue-link`
 
@@ -107,7 +107,7 @@ Non-seed flags (`--source`, `--push`, `--clone`, `--description`, `--public|--pr
 
 ## Predicate
 
-`when.missingVaultBodyFile` takes `{ section: "prs" | "issues" }` and returns `true` (rule blocks) when the command's `--body-file` value is missing or not the pinned `<(perl -0777 -pe '<BODY_STRIP>' <path>)` substitution form (direct paths, inline `--body`, wrong inner commands, extra or missing tokens). Fail-closed: anything unverifiable counts as missing. The `section` argument is carried for contract stability — the `<repo>/<section>/` placement is convention, taught by the rule reasons, and verified only at runtime by the substitution itself.
+`when.missingVaultBodyFile` takes `{ section: "prs" | "issues" }` and returns `true` (rule blocks) when the command's `--body-file` value is missing, not the pinned `<(perl -0777 -pe '<BODY_STRIP>' <path>)` substitution form (direct paths, inline `--body`, wrong inner commands, extra or missing tokens), or the path fails the vault check: it must resolve to a real file inside a napkin vault (`.napkin/` / `.obsidian/.napkin/` walk-up), under a `<repo>/<section>/` directory (`<repo>` = origin URL basename, cwd-folder fallback). Fail-closed: anything unverifiable (incl. walker-unknown cwd) counts as missing. The `section` argument selects the required `<repo>/<section>/` directory — the convention is taught by the rule reasons AND enforced here.
 
 ## Disabling
 
