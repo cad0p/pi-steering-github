@@ -34,11 +34,13 @@
  *          the description-channel auto-close on merge.
  *
  *   3. `pr-merge-needs-closing-keywords`
- *      `gh pr merge` must carry a closing keyword + `#N` in BOTH the
- *      `--subject` value (commit subject) and the `--body` value
- *      (commit body) — both channels are parsed at merge even with a
- *      Title-Only policy; passing both explicitly protects against
- *      PR title/body edits made between creation and merge.
+ *      `gh pr merge` must carry a closing keyword + `#N` in the
+ *      `--subject` value (commit subject). GitHub scans the whole
+ *      squash commit message for closing keywords, so the commit
+ *      subject alone closes the issues — the commit body channel is
+ *      optional at merge (relaxed from BOTH channels on 2026-08-16,
+ *      user decision: the body requirement was redundant friction;
+ *      the reason text now matches enforcement).
  *
  *   4. `issue-body-from-vault-file`
  *      `gh issue create|edit` must take the body from the same
@@ -129,7 +131,7 @@ export const TITLE_WITH_REF = flagValueWithRef("--title", "-t");
 /** `--subject|-t` value must hold the ref (merge — the commit subject). */
 export const SUBJECT_WITH_REF = flagValueWithRef("--subject", "-t");
 
-/** `--body|-b` value must hold the ref (merge + inline fallback). */
+/** `--body|-b` value must hold the ref (create inline fallback). */
 export const BODY_WITH_REF = flagValueWithRef("--body", "-b");
 
 /** `pr-body-from-vault-file` anchor: pr create/new/edit. */
@@ -140,16 +142,14 @@ export const PR_CREATE_ANCHOR = /^gh\s+pr\s+(?:create|new)\b/i;
 
 /**
  * `pr-merge-needs-closing-keywords` pattern: fires unless the command
- * carries a closing-keyword ref in BOTH the `--subject` value and the
- * `--body` value (either flag order, short `-t`/`-b` forms,
- * `--flag=value` forms).
+ * carries a closing-keyword ref in the `--subject` value (short
+ * `-t` form, `--flag=value` forms). The commit subject is part of
+ * the squash commit message — GitHub scans the whole message for
+ * closing keywords, so the subject channel alone closes the issues
+ * (the commit body is optional at merge).
  */
 export const PR_MERGE_PATTERN = new RegExp(
-  `^gh\\s+pr\\s+merge\\b(?!` +
-    `[\\s\\S]*${SUBJECT_WITH_REF}[\\s\\S]*${BODY_WITH_REF}` +
-    `|` +
-    `[\\s\\S]*${BODY_WITH_REF}[\\s\\S]*${SUBJECT_WITH_REF}` +
-    `)`,
+  `^gh\\s+pr\\s+merge\\b(?!` + `[\\s\\S]*${SUBJECT_WITH_REF}` + `)`,
   "i",
 );
 
@@ -239,12 +239,12 @@ export const prCreateNeedsIssueLink = {
 
 /**
  * `pr-merge-needs-closing-keywords` — a PR may not be merged without
- * the closing keywords in BOTH the `--subject` value (commit subject)
- * and the `--body` value (commit body). Fires unless both carry a
- * closing keyword + `#N` (either flag order, short `-t`/`-b` forms,
- * `--flag=value` forms). Passing both explicitly protects against PR
- * title/body edits between creation and merge; GitHub parses both
- * channels even with a Title-Only commit policy.
+ * a closing keyword + `#N` in the `--subject` value (commit subject;
+ * short `-t` form, `--flag=value` forms). Fires unless the subject
+ * carries one. GitHub scans the whole squash commit message for
+ * closing keywords, so the commit subject alone closes the issues
+ * — the commit body is optional at merge (relaxed from BOTH channels
+ * on 2026-08-16, user decision).
  *
  * Strict — no override (schema default).
  */

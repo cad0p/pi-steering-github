@@ -181,25 +181,25 @@ describe("github plugin — pr-merge-needs-closing-keywords (normalized form)", 
   });
 
   // Normalized form of: gh pr merge --squash --subject "fix: x (closes #12)"
-  it("blocks without --body (commit-body channel required)", () => {
+  it("allows --subject only (commit-body channel optional — the subject closes)", () => {
     assert.equal(
       blocked(
         PR_MERGE_PATTERN,
         "gh pr merge --squash --subject fix: x (closes #12)",
       ),
-      true,
+      false,
     );
   });
 
   // Normalized form of:
   //   gh pr merge --squash --subject "fix: x (closes #12)" --body-file message.md
-  it("blocks --body-file", () => {
+  it("allows --body-file when --subject carries the keyword", () => {
     assert.equal(
       blocked(
         PR_MERGE_PATTERN,
         "gh pr merge --squash --subject fix: x (closes #12) --body-file message.md",
       ),
-      true,
+      false,
     );
   });
 

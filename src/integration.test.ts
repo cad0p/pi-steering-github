@@ -535,14 +535,13 @@ describe("github plugin — PR rules (issue-link + vault body-file policy)", () 
     assert.equal(rule, "pr-merge-needs-closing-keywords");
   });
 
-  it("blocks pr merge without --body (commit-body channel required)", async () => {
+  it("allows pr merge with --subject only (commit subject closes; body optional)", async () => {
     const { block, rule } = await evaluateBash(
       makeFixtureDir(),
       `gh pr merge --squash --subject "feat: x (closes #12)"`,
       host,
     );
-    assert.equal(block, true, "expected block");
-    assert.equal(rule, "pr-merge-needs-closing-keywords");
+    assert.equal(block, false, `expected allow, got block by ${rule}`);
   });
 
   it("blocks pr merge with a bare mention only", async () => {
