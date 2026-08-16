@@ -9,10 +9,13 @@
  * convention:
  *
  *   1. `pr-body-from-vault-file` (FIRST — write the body first)
- *      `gh pr create|new|edit` must take the body from `--body-file`
- *      pointing at a file INSIDE a napkin vault under a
- *      `<repo>/prs/` directory. Inline `--body` is blocked. No
- *      content check — placement only (responsibility separation).
+ *      `gh pr create|new|edit` must take the body from
+ *      `--body-file <(perl -0777 -pe '<BODY_STRIP>' <vault-file>)`
+ *      — a process substitution running the pinned perl one-liner
+ *      (removes the note's YAML frontmatter before `gh` uploads it;
+ *      the H1 stays). Direct paths upload verbatim and are blocked,
+ *      like inline `--body`. FORM check only — the path argument is
+ *      not validated (the substitution is the runtime verifier).
  *
  *   2. `pr-create-needs-issue-link`
  *      `gh pr create|new` must carry a closing keyword
@@ -36,8 +39,9 @@
  *      PR title/body edits made between creation and merge.
  *
  *   4. `issue-body-from-vault-file`
- *      `gh issue create|edit` must take the body from `--body-file`
- *      inside a napkin vault under a `<repo>/issues/` directory.
+ *      `gh issue create|edit` must take the body from the same
+ *      pinned perl substitution as step 1 (under a `<repo>/issues/`
+ *      directory in the vault).
  *
  *   5. `gh-repo-create-needs-seed`
  *      `gh repo create|new` must carry a seed flag (`--add-readme`,
@@ -69,6 +73,7 @@
  */
 
 import type { Rule } from "@cad0p/pi-steering";
+import { BODY_STRIP } from "./body-strip.ts";
 import {
   bodyHasClosingKeyword,
   findFlagValue,
@@ -171,11 +176,14 @@ export const REPO_CREATE_PATTERN = new RegExp(
 );
 
 /**
- * `pr-body-from-vault-file` — PR bodies must come from a body file in
- * the napkin vault (create, new, and edit). Inline `--body` is
- * blocked; the file must be inside a napkin vault under a
- * `<repo>/prs/` directory. Placement only — the closing-keyword
- * content check belongs to `pr-create-needs-issue-link`.
+ * `pr-body-from-vault-file` — PR bodies must come from a vault note,
+ * uploaded through the pinned perl substitution (create, new, and
+ * edit): `--body-file <(perl -0777 -pe '<BODY_STRIP>' <vault-file>)`
+ * — the one-liner strips the YAML frontmatter before `gh` uploads
+ * the content (the H1 stays). Direct paths (verbatim upload) and
+ * inline `--body` are blocked. FORM check only — the path argument
+ * is not validated; the substitution is the runtime verifier. The
+ * closing-keyword content check belongs to `pr-create-needs-issue-link`.
  *
  * Strict — no override (schema default).
  */
@@ -186,17 +194,17 @@ export const prBodyFromVaultFile = {
   pattern: PR_BODY_ANCHOR,
   when: { missingVaultBodyFile: { section: "prs" } },
   reason:
-    `PR bodies must come from a body file in the napkin vault — write it first, ` +
-    `then reference it:\n` +
+    `PR bodies must come from a body file in the napkin vault:\n` +
     `  gh pr create --title "..." --body-file ` +
-    `<vault>/**/<repo>/prs/YYYY-MM-DD-pr<N>-<slug>.md\n`,
+    `<(perl -0777 -pe '${BODY_STRIP}' ` +
+    `<vault>/**/<repo>/prs/YYYY-MM-DD-pr<N>-<slug>.md)\n`,
 } as const satisfies Rule;
 
 /**
  * `pr-create-needs-issue-link` — a PR may not be opened without at
  * least one attached issue: a closing keyword + `#N` in BOTH the
- * inline `--title` value and the body (vault body-file content, with
- * inline `--body` as a fallback). Fires when EITHER is missing
+ * inline `--title` value and the body (stripped vault body-file
+ * content, with inline `--body` as a fallback). Fires when EITHER is missing
  * (`when.condition` is an OR — the pattern only anchors the command).
  *
  * Does NOT fire on other gh subcommands. Fires on draft PRs without
@@ -209,10 +217,10 @@ export const prCreateNeedsIssueLink = {
   field: "command",
   pattern: PR_CREATE_ANCHOR,
   when: {
-    condition: (ctx) => {
+    condition: async (ctx) => {
       const title = findFlagValue(ctx, ["--title", "-t"]);
       const titleOk = title !== null && new RegExp(ISSUE_REF, "i").test(title);
-      return !titleOk || !bodyHasClosingKeyword(ctx);
+      return !titleOk || !(await bodyHasClosingKeyword(ctx));
     },
   },
   reason:
@@ -249,11 +257,12 @@ export const prMergeNeedsClosingKeywords = {
 } as const satisfies Rule;
 
 /**
- * `issue-body-from-vault-file` — issue bodies must come from a body
- * file in the napkin vault (create and edit). Inline `--body` is
- * blocked; the file must be inside a napkin vault under a
- * `<repo>/issues/` directory. No keyword requirement (issues close
- * nothing).
+ * `issue-body-from-vault-file` — issue bodies must come from a vault
+ * note, uploaded through the same pinned perl substitution (create
+ * and edit): `--body-file
+ * <(perl -0777 -pe '<BODY_STRIP>' <vault-file>)`. Direct
+ * paths (verbatim upload) and inline `--body` are blocked. FORM
+ * check only. No keyword requirement (issues close nothing).
  *
  * Strict — no override (schema default).
  */
@@ -264,10 +273,10 @@ export const issueBodyFromVaultFile = {
   pattern: ISSUE_BODY_ANCHOR,
   when: { missingVaultBodyFile: { section: "issues" } },
   reason:
-    `Issue bodies must come from a body file in the napkin vault — write it first, ` +
-    `then reference it:\n` +
+    `Issue bodies must come from a body file in the napkin vault:\n` +
     `  gh issue create --title "..." --body-file ` +
-    `<vault>/**/<repo>/issues/YYYY-MM-DD-issue<N>-<slug>.md\n` +
+    `<(perl -0777 -pe '${BODY_STRIP}' ` +
+    `<vault>/**/<repo>/issues/YYYY-MM-DD-issue<N>-<slug>.md)\n` +
     `- If foreign issue: cd to the repo you want to file the issue; ` +
     `REQUIREMENT: have a foreign subagent maintainer loop before filing`,
 } as const satisfies Rule;

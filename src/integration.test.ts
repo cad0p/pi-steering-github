@@ -11,13 +11,23 @@
  * The `missingVaultBodyFile` predicate walks the real filesystem
  * (napkin-vault detection + repo-name check via the exec stub), so
  * these scenarios use REAL fixture dirs (mkdtemp) for vault /
- * non-vault paths. Blocked commands surface the rule name through
+ * non-vault paths. Vault body files carry frontmatter + H1 (like
+ * real Goldmine notes) and must be uploaded through the strip-helper
+ * substitution form `--body-file <(pi-steering-github strip
+ * "<file>")` — the walker keeps the substitution's full inner text
+ * as one arg word. Blocked commands surface the rule name through
  * the reason-tag convention (`[steering:<rule>@<plugin>]` — the
  * extraction regex accepts both tagged and untagged forms).
  */
 
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, it } from "node:test";
@@ -28,6 +38,7 @@ import {
   mockExtensionContext,
 } from "@cad0p/pi-steering/testing";
 import type { ExecResult } from "@earendil-works/pi-coding-agent";
+import { BODY_STRIP } from "./body-strip.ts";
 import { githubPlugin } from "./index.ts";
 
 const config = defineConfig({ plugins: [githubPlugin] });
@@ -56,6 +67,8 @@ function makeNestedVaultFixture(): string {
 /**
  * A napkin-vault fixture laid out like the real Goldmine convention:
  * `<vault>/open-source/github/<repo>/prs|issues/<date>-pr|issue<N>-<slug>.md`.
+ * Body files carry frontmatter + H1 like real notes — the
+ * strip-helper convention is what keeps GitHub bodies clean.
  */
 interface VaultRepoFixture {
   vault: string;
@@ -71,9 +84,15 @@ function makeVaultRepoFixture(repo: string): VaultRepoFixture {
   mkdirSync(prsDir, { recursive: true });
   mkdirSync(issuesDir, { recursive: true });
   const prBodyFile = join(prsDir, `2026-08-14-pr1-${repo}-test.md`);
-  writeFileSync(prBodyFile, "Closes #12\n\n## What\n\nBody text.\n");
+  writeFileSync(
+    prBodyFile,
+    "---\ntags: [test]\n---\n# Title\n\nCloses #12\n\nBody.\n",
+  );
   const issueBodyFile = join(issuesDir, `2026-08-14-issue1-${repo}-test.md`);
-  writeFileSync(issueBodyFile, "## What\n\nIssue body text.\n");
+  writeFileSync(
+    issueBodyFile,
+    "---\ntags: [test]\n---\n# Title\n\nIssue body text.\n",
+  );
   return { vault, repo, prBodyFile, issueBodyFile };
 }
 
@@ -83,11 +102,27 @@ afterEach(() => {
   }
 });
 
+/** The pinned perl substitution form the vault body-file rules require. */
+function stripSubstitution(file: string): string {
+  return `<(perl -0777 -pe '${BODY_STRIP}' "${file}")`;
+}
+
+/**
+ * JS mirror of the pinned perl program (test stub only — the real
+ * behavior is pinned by body-strip.test.ts spawning perl).
+ */
+function stripFrontmatter(content: string): string {
+  return content.replace(
+    /^(?:\uFEFF)?---\r?\n(?:.*?\r?\n)?(?:---|\.\.\.)\r?\n(?:\r?\n)*(?:[ \t]*\r?\n)*(?:#(?![\S])[^\n]*(?:\r?\n)?(?:[ \t]*\r?\n)*)?/,
+    "",
+  );
+}
+
 /**
  * Build a host whose `exec` stub answers git queries as if the cwd is
- * a github clone on a feature branch. The github rules' repo check
- * shells out to `git config --get remote.origin.url` (via the
- * `missingVaultBodyFile` predicate).
+ * a github clone on a feature branch, and answers the keyword
+ * rule's pinned-perl call with the frontmatter-stripped file content
+ * (exactly what gh would upload).
  */
 function hostWithRemote(
   remoteUrl: string,
@@ -111,6 +146,36 @@ function hostWithRemote(
       ) {
         return Promise.resolve({
           stdout: remoteUrl,
+          stderr: "",
+          code: 0,
+          killed: false,
+        } satisfies ExecResult);
+      }
+      if (cmd === "perl" && args[0] === "-0777" && args[1] === "-pe") {
+        // The keyword check runs the pinned one-liner: answer with
+        // the stripped file content (canonical = what gh uploads).
+        const file = args[3];
+        if (file === undefined) {
+          return Promise.resolve({
+            stdout: "",
+            stderr: "perl: no file",
+            code: 1,
+            killed: false,
+          } satisfies ExecResult);
+        }
+        let stripped = "";
+        try {
+          stripped = stripFrontmatter(readFileSync(file, "utf8"));
+        } catch {
+          return Promise.resolve({
+            stdout: "",
+            stderr: "no such file",
+            code: 1,
+            killed: false,
+          } satisfies ExecResult);
+        }
+        return Promise.resolve({
+          stdout: stripped,
           stderr: "",
           code: 0,
           killed: false,
@@ -189,17 +254,17 @@ describe("github plugin — PR rules (issue-link + vault body-file policy)", () 
 
   // ---- pr-body-from-vault-file (runs FIRST — first-match-wins) ----
 
-  it("allows pr create with keyword title + vault prs/ body file", async () => {
+  it("allows pr create with keyword title + stripped vault prs/ body file (frontmatter + H1)", async () => {
     const fx = makeVaultRepoFixture(repo);
     const { block, rule } = await evaluateBash(
       makeFixtureDir(),
-      `gh pr create --title "feat: x (closes #12)" --body-file "${fx.prBodyFile}"`,
+      `gh pr create --title "feat: x (closes #12)" --body-file ${stripSubstitution(fx.prBodyFile)}`,
       host,
     );
     assert.equal(block, false, `expected allow, got block by ${rule}`);
   });
 
-  it("allows pr create with a body file in a nested-layout vault (.obsidian/.napkin/)", async () => {
+  it("allows pr create with a stripped body file in a nested-layout vault (.obsidian/.napkin/)", async () => {
     const vault = makeNestedVaultFixture();
     const prsDir = join(vault, "open-source", "github", repo, "prs");
     mkdirSync(prsDir, { recursive: true });
@@ -207,27 +272,47 @@ describe("github plugin — PR rules (issue-link + vault body-file policy)", () 
     writeFileSync(bodyFile, "Closes #12\n");
     const { block, rule } = await evaluateBash(
       makeFixtureDir(),
-      `gh pr create --title "feat: x (closes #12)" --body-file "${bodyFile}"`,
+      `gh pr create --title "feat: x (closes #12)" --body-file ${stripSubstitution(bodyFile)}`,
       host,
     );
     assert.equal(block, false, `expected allow, got block by ${rule}`);
   });
 
-  it("allows pr edit with a vault prs/ body file", async () => {
+  it("allows pr edit with a stripped vault prs/ body file", async () => {
     const fx = makeVaultRepoFixture(repo);
     const { block, rule } = await evaluateBash(
       makeFixtureDir(),
-      `gh pr edit 46 --body-file "${fx.prBodyFile}"`,
+      `gh pr edit 46 --body-file ${stripSubstitution(fx.prBodyFile)}`,
       host,
     );
     assert.equal(block, false, `expected allow, got block by ${rule}`);
   });
 
-  it("allows issue create with a vault issues/ body file", async () => {
+  it("allows issue create with a stripped vault issues/ body file", async () => {
     const fx = makeVaultRepoFixture(repo);
     const { block, rule } = await evaluateBash(
       makeFixtureDir(),
-      `gh issue create --title "tracking" --body-file "${fx.issueBodyFile}"`,
+      `gh issue create --title "tracking" --body-file ${stripSubstitution(fx.issueBodyFile)}`,
+      host,
+    );
+    assert.equal(block, false, `expected allow, got block by ${rule}`);
+  });
+
+  it("allows issue edit with a stripped vault issues/ body file", async () => {
+    const fx = makeVaultRepoFixture(repo);
+    const { block, rule } = await evaluateBash(
+      makeFixtureDir(),
+      `gh issue edit 29 --body-file ${stripSubstitution(fx.issueBodyFile)}`,
+      host,
+    );
+    assert.equal(block, false, `expected allow, got block by ${rule}`);
+  });
+
+  it("allows the glued --body-file=<(…) form (walker-split into two words)", async () => {
+    const fx = makeVaultRepoFixture(repo);
+    const { block, rule } = await evaluateBash(
+      makeFixtureDir(),
+      `gh pr create --title "feat: x (closes #12)" --body-file=${stripSubstitution(fx.prBodyFile)}`,
       host,
     );
     assert.equal(block, false, `expected allow, got block by ${rule}`);
@@ -243,34 +328,8 @@ describe("github plugin — PR rules (issue-link + vault body-file policy)", () 
     assert.equal(rule, "pr-body-from-vault-file");
   });
 
-  it("blocks pr create with --body-file outside any vault", async () => {
-    const outside = makeFixtureDir();
-    const bodyFile = join(outside, "body.md");
-    writeFileSync(bodyFile, "Closes #12\n");
-    const { block, rule } = await evaluateBash(
-      makeFixtureDir(),
-      `gh pr create --title "feat: x (closes #12)" --body-file "${bodyFile}"`,
-      host,
-    );
-    assert.equal(block, true, "expected block");
-    assert.equal(rule, "pr-body-from-vault-file");
-  });
-
-  it("blocks pr create with a vault file under issues/ (wrong section)", async () => {
+  it("blocks a DIRECT vault path (only the strip-helper substitution is accepted)", async () => {
     const fx = makeVaultRepoFixture(repo);
-    const { block, rule } = await evaluateBash(
-      makeFixtureDir(),
-      `gh pr create --title "feat: x (closes #12)" --body-file "${fx.issueBodyFile}"`,
-      host,
-    );
-    assert.equal(block, true, "expected block");
-    assert.equal(rule, "pr-body-from-vault-file");
-  });
-
-  it("blocks pr create when the vault file's repo doesn't match the remote", async () => {
-    // File lives under open-source/github/other-repo/prs/, but the
-    // (stubbed) remote says fixture-repo.
-    const fx = makeVaultRepoFixture("other-repo");
     const { block, rule } = await evaluateBash(
       makeFixtureDir(),
       `gh pr create --title "feat: x (closes #12)" --body-file "${fx.prBodyFile}"`,
@@ -280,15 +339,79 @@ describe("github plugin — PR rules (issue-link + vault body-file policy)", () 
     assert.equal(rule, "pr-body-from-vault-file");
   });
 
-  it('fail-closed: dynamic cwd (cd "$X") with --body-file blocks', async () => {
+  it("blocks issue create with a DIRECT vault path", async () => {
     const fx = makeVaultRepoFixture(repo);
     const { block, rule } = await evaluateBash(
       makeFixtureDir(),
-      `cd "$X" && gh pr create --title "feat: x (closes #12)" --body-file "${fx.prBodyFile}"`,
+      `gh issue create --title "tracking" --body-file "${fx.issueBodyFile}"`,
+      host,
+    );
+    assert.equal(block, true, "expected block");
+    assert.equal(rule, "issue-body-from-vault-file");
+  });
+
+  it("blocks pr create with a non-strip inner command (<(cat …))", async () => {
+    const fx = makeVaultRepoFixture(repo);
+    const { block, rule } = await evaluateBash(
+      makeFixtureDir(),
+      `gh pr create --title "feat: x (closes #12)" --body-file <(cat "${fx.prBodyFile}")`,
       host,
     );
     assert.equal(block, true, "expected block");
     assert.equal(rule, "pr-body-from-vault-file");
+  });
+
+  it("passes a substitution pointing OUTSIDE any vault (form-only — runtime verifies)", async () => {
+    // The predicate is a pure FORM check: the path argument is not
+    // validated. A non-vault path passes the gate by design; perl
+    // fails at runtime, gh reads an empty fd, and the agent
+    // self-corrects (the kb_read feedback model).
+    const outside = makeFixtureDir();
+    const bodyFile = join(outside, "body.md");
+    writeFileSync(bodyFile, "Closes #12\n");
+    const { block, rule } = await evaluateBash(
+      makeFixtureDir(),
+      `gh pr create --title "feat: x (closes #12)" --body-file ${stripSubstitution(bodyFile)}`,
+      host,
+    );
+    assert.equal(block, false, `expected allow, got block by ${rule}`);
+  });
+
+  it("passes a substitution pointing at a wrong-section file (form-only)", async () => {
+    // issues/ file carrying a keyword: the form check does not care
+    // about the section (reason-taught convention only).
+    const fx = makeVaultRepoFixture(repo);
+    const kwFile = join(dirname(fx.issueBodyFile), "2026-08-14-issue2-kw.md");
+    writeFileSync(kwFile, "Closes #12\n");
+    const { block, rule } = await evaluateBash(
+      makeFixtureDir(),
+      `gh pr create --title "feat: x (closes #12)" --body-file ${stripSubstitution(kwFile)}`,
+      host,
+    );
+    assert.equal(block, false, `expected allow, got block by ${rule}`);
+  });
+
+  it("passes a substitution pointing at another repo's file (form-only)", async () => {
+    // File lives under open-source/github/other-repo/prs/ — the
+    // predicate does not resolve the path, so the remote is
+    // irrelevant. The section convention is reason-taught only.
+    const fx = makeVaultRepoFixture("other-repo");
+    const { block, rule } = await evaluateBash(
+      makeFixtureDir(),
+      `gh pr create --title "feat: x (closes #12)" --body-file ${stripSubstitution(fx.prBodyFile)}`,
+      host,
+    );
+    assert.equal(block, false, `expected allow, got block by ${rule}`);
+  });
+
+  it('passes a substitution under a dynamic cwd (cd "$X") — form check is cwd-independent', async () => {
+    const fx = makeVaultRepoFixture(repo);
+    const { block, rule } = await evaluateBash(
+      makeFixtureDir(),
+      `cd "$X" && gh pr create --title "feat: x (closes #12)" --body-file ${stripSubstitution(fx.prBodyFile)}`,
+      host,
+    );
+    assert.equal(block, false, `expected allow, got block by ${rule}`);
   });
 
   it("blocks pr edit with inline --body", async () => {
@@ -311,26 +434,41 @@ describe("github plugin — PR rules (issue-link + vault body-file policy)", () 
     assert.equal(rule, "issue-body-from-vault-file");
   });
 
-  it("blocks issue create with a vault prs/ file (wrong section)", async () => {
+  it("passes issue create with a prs/ file via substitution (form-only)", async () => {
     const fx = makeVaultRepoFixture(repo);
     const { block, rule } = await evaluateBash(
       makeFixtureDir(),
-      `gh issue create --title "tracking" --body-file "${fx.prBodyFile}"`,
+      `gh issue create --title "tracking" --body-file ${stripSubstitution(fx.prBodyFile)}`,
       host,
     );
-    assert.equal(block, true, "expected block");
-    assert.equal(rule, "issue-body-from-vault-file");
+    assert.equal(block, false, `expected allow, got block by ${rule}`);
   });
 
   // ---- pr-create-needs-issue-link ----
 
-  it("blocks pr create when the vault body file lacks the closing keyword", async () => {
+  it("blocks pr create when the stripped vault body lacks the closing keyword", async () => {
     const fx = makeVaultRepoFixture(repo);
     const badFile = join(dirname(fx.prBodyFile), "2026-08-14-pr2-nokw.md");
     writeFileSync(badFile, "## What\n\nNo keywords here.\n");
     const { block, rule } = await evaluateBash(
       makeFixtureDir(),
-      `gh pr create --title "feat: x (closes #12)" --body-file "${badFile}"`,
+      `gh pr create --title "feat: x (closes #12)" --body-file ${stripSubstitution(badFile)}`,
+      host,
+    );
+    assert.equal(block, true, "expected block");
+    assert.equal(rule, "pr-create-needs-issue-link");
+  });
+
+  it("blocks pr create when the closing keyword ONLY appears in frontmatter", async () => {
+    const fx = makeVaultRepoFixture(repo);
+    const kwFile = join(dirname(fx.prBodyFile), "2026-08-14-pr2-fmkw.md");
+    writeFileSync(
+      kwFile,
+      "---\ncloses: #12\n---\n# Title\n\nNo keyword here.\n",
+    );
+    const { block, rule } = await evaluateBash(
+      makeFixtureDir(),
+      `gh pr create --title "feat: x (closes #12)" --body-file ${stripSubstitution(kwFile)}`,
       host,
     );
     assert.equal(block, true, "expected block");
@@ -341,7 +479,7 @@ describe("github plugin — PR rules (issue-link + vault body-file policy)", () 
     const fx = makeVaultRepoFixture(repo);
     const { block, rule } = await evaluateBash(
       makeFixtureDir(),
-      `gh pr create --title "feat: x" --body-file "${fx.prBodyFile}"`,
+      `gh pr create --title "feat: x" --body-file ${stripSubstitution(fx.prBodyFile)}`,
       host,
     );
     assert.equal(block, true, "expected block");
@@ -352,7 +490,7 @@ describe("github plugin — PR rules (issue-link + vault body-file policy)", () 
     const fx = makeVaultRepoFixture(repo);
     const { block, rule } = await evaluateBash(
       makeFixtureDir(),
-      `gh pr create --title "feat: x (#12)" --body-file "${fx.prBodyFile}"`,
+      `gh pr create --title "feat: x (#12)" --body-file ${stripSubstitution(fx.prBodyFile)}`,
       host,
     );
     assert.equal(block, true, "expected block");
@@ -365,7 +503,7 @@ describe("github plugin — PR rules (issue-link + vault body-file policy)", () 
     writeFileSync(multiFile, "Closes #12, closes #15\n");
     const { block, rule } = await evaluateBash(
       makeFixtureDir(),
-      `gh pr create --title "fix: multi (closes #12)" --body-file "${multiFile}"`,
+      `gh pr create --title "fix: multi (closes #12)" --body-file ${stripSubstitution(multiFile)}`,
       host,
     );
     assert.equal(block, false, `expected allow, got block by ${rule}`);
