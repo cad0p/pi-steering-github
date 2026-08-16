@@ -17,6 +17,10 @@ All notable changes to this project will be documented in this file.
 
 - Correct reason-string quirks — issues/ path hint + merge grammar (closes #4)
 
+### 📚 Documentation
+
+- Fix stale H1-kept comments — the H1 is stripped too (closes #3)
+
 
 ## [Unreleased]
 
