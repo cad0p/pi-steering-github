@@ -160,9 +160,13 @@ export const REPO_CREATE_ANCHOR = /^gh\s+repo\s+(?:create|new)\b/i;
 export const REPO_CREATE_SEED_FLAG =
   "(?:^|\\s)(?:--add-readme|--gitignore|-g|--license|-l|--template|-p)(?=$|\\s|=)";
 
-/** Fires unless a seed flag token appears anywhere in the command. */
+/**
+ * Fires unless a seed flag token appears anywhere in the command.
+ * Derived from `REPO_CREATE_ANCHOR` (its `source` + the `i` flag) so
+ * the anchor constant can never drift from the shipped pattern.
+ */
 export const REPO_CREATE_PATTERN = new RegExp(
-  `^gh\\s+repo\\s+(?:create|new)\\b(?![\\s\\S]*${REPO_CREATE_SEED_FLAG})`,
+  `${REPO_CREATE_ANCHOR.source}(?![\\s\\S]*${REPO_CREATE_SEED_FLAG})`,
   "i",
 );
 

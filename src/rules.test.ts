@@ -326,6 +326,22 @@ describe("github plugin — gh-repo-create-needs-seed (normalized form)", () => 
       true,
     );
   });
+
+  // Accepted limitation (README "Known limitations"): the guard kills
+  // only GLUED lookalikes — a space-separated seed token inside a
+  // quoted flag value (quotes stripped in the normalized form) still
+  // counts as a seed and falsely exempts. Deliberate, pinned so the
+  // behavior can't change silently; same value-region class as the
+  // PR_* patterns.
+  it("accepted false exemption: seed token inside a quoted flag value", () => {
+    assert.equal(
+      blocked(
+        REPO_CREATE_PATTERN,
+        "gh repo create x --description see --license mit",
+      ),
+      false,
+    );
+  });
 });
 
 describe("github plugin — reason strings (byte-identity pins)", () => {
