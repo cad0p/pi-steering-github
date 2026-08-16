@@ -10,7 +10,7 @@ One `Plugin` (`name: "github"`) with five rules and one predicate:
 | --- | --- | --- |
 | `pr-body-from-vault-file` | `gh pr create \| new \| edit` | the body doesn't come from `--body-file <(perl -0777 -pe '<BODY_STRIP>' <file>)` — a process substitution running the pinned perl one-liner (direct paths and inline `--body` are blocked) |
 | `pr-create-needs-issue-link` | `gh pr create \| new` | the `--title` value or the body lacks a closing keyword + `#N` |
-| `pr-merge-needs-closing-keywords` | `gh pr merge` | `--subject` or `--body` lacks a closing keyword + `#N` |
+| `pr-merge-needs-closing-keywords` | `gh pr merge` | the `--subject` value lacks a closing keyword + `#N` |
 
 | `issue-body-from-vault-file` | `gh issue create \| edit` | the body doesn't come from `--body-file` pointing at a `<repo>/issues/` napkin-vault file |
 | `gh-repo-create-needs-seed` | `gh repo create \| new` | no seed flag present (`--add-readme`, `--gitignore\|-g`, `--license\|-l`, `--template\|-p`) — a bare create births an EMPTY repo |
@@ -63,7 +63,7 @@ FORM + vault-path check — the substitution must be the pinned form AND the fil
 
 ### `pr-merge-needs-closing-keywords`
 
-`gh pr merge` must carry a closing keyword + `#N` in **both** the `--subject` value (commit subject) and the `--body` value (commit body) — either flag order, short `-t`/`-b` forms, `--flag=value` forms. Passing both explicitly protects against PR title/body edits between creation and merge; GitHub parses both channels even with a Title-Only commit policy.
+`gh pr merge` must carry a closing keyword + `#N` in the `--subject` value (commit subject) — short `-t` form, `--flag=value` forms. GitHub scans the whole squash commit message for closing keywords, so the commit subject alone closes the issues; the commit body is optional at merge.
 
 ### `issue-body-from-vault-file`
 
@@ -143,7 +143,7 @@ The pattern constants (`CLOSING_KEYWORD`, `ISSUE_REF`, `TITLE_WITH_REF`, `SUBJEC
 ## Known limitations
 
 - **Inline `--body` is blocked** by the vault body-file rules by design — the file is the source of truth. If you need inline bodies, disable those rules.
-- **`--body-file` content is checked at eval time** by `pr-create-needs-issue-link` / `pr-merge-needs-closing-keywords`: the file must already contain the closing keyword when the command runs. `pr-merge-needs-closing-keywords` additionally has no `--body-file` support — merge commit messages must be passed explicitly via `--subject` / `--body`.
+- **`--body-file` content is checked at eval time** by `pr-create-needs-issue-link` (and the merge gate no longer inspects the body at all — the `--subject` channel is sufficient): the file must already contain the closing keyword when the command runs. `pr-merge-needs-closing-keywords` checks only the explicit `--subject` value.
 - **Value-region truncation**: pattern matching runs on the walker-normalized command, and a flag's value region ends at the next `\s-` pair. A value containing a literal ` - ` (space-dash-space) truncates the region, so a closing-keyword ref after such a sequence may be missed (rule fires; add the keyword earlier in the value).
 - **Quoted-value false exemption (`gh-repo-create-needs-seed`)**: a seed-looking token inside a QUOTED flag value (e.g. `--description "see --license mit"`) falsely exempts the command — the token guard kills only GLUED lookalikes (`-local`, `foo--add-readme`), not space-separated tokens inside quoted values. Deliberately exploitable: an agent could embed a fake seed mention and still birth an empty repo. Accepted — same value-region class as the PR_* patterns; the walker contract is the plugin's foundation.
 - **`-R`-before-subcommand forms unanchored**: `gh -R x repo create` doesn't match the anchors — plugin-wide non-goal, same as the PR/issue rules.
