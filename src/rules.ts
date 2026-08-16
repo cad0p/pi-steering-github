@@ -299,10 +299,9 @@ export const ghRepoCreateNeedsSeed = {
   pattern: REPO_CREATE_PATTERN,
   reason:
     "gh repo create must seed the repo — a bare create births an EMPTY repo (no branches, no commits), " +
-    "forcing the no-main-commit override dance and UNREVIEWED first content:\n" +
+    "forcing UNREVIEWED first content. Use seed flags and seek explicit user approval for PR merge.\n" +
     "  gh repo create cad0p/<name> --add-readme\n" +
     "- Seed flags: --add-readme (recommended), --license <x>, --gitignore <x>, --template <repo>.\n" +
-    "- Then: git fetch → git checkout -b feat/bootstrap origin/main → commit → push → PR → squash merge.\n" +
     "- The seed commit is the PR's base — the PR diff replaces it, so the first content is reviewed.",
 } as const satisfies Rule;
 
