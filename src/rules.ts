@@ -239,8 +239,8 @@ export const issueBodyFromVaultFile = {
     `then reference it:\n` +
     `  gh issue create --title "..." --body-file ` +
     `<vault>/**/<repo>/issues/YYYY-MM-DD-issue<N>-<slug>.md\n` +
-    `- If foreign issue: cd to the repo you want to file the issue ` +
-    `and have a foreign subagent maintainer loop before filing`,
+    `- If foreign issue: cd to the repo you want to file the issue; ` +
+    `REQUIREMENT: have a foreign subagent maintainer loop before filing`,
 } as const satisfies Rule;
 
 /**
