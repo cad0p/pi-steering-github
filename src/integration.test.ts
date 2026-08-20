@@ -231,6 +231,7 @@ describe("github plugin — shape", () => {
     assert.deepEqual(
       plugin?.rules?.map((r) => r.name),
       [
+        "gh-repo-flag-before-subcommand",
         "pr-body-from-vault-file",
         "pr-create-needs-issue-link",
         "pr-merge-needs-closing-keywords",
