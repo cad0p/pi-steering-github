@@ -165,21 +165,21 @@ export const REPO_CREATE_ANCHOR = /^gh\s+repo\s+(?:create|new)\b/i;
 
 /**
  * `gh-repo-flag-before-subcommand` pattern: a PURE ROUTER — `gh`
- * with a `-R`/`--repo` global flag BEFORE the subcommand, a
- * `/`-containing target, then a gated `pr create|new|edit|merge` or
- * `issue create|edit`. It only decides "is this a `-R`-first gated
- * command with a slash-target?" — all VALUE parsing (flag form,
- * target extraction, help carve-out) happens on the walker argv via
- * `@cad0p/pi-steering-flags`' `hasFlag`/`getFlagValue` in the rule's
- * `unless` fn (arg layer, quote-aware). The `/` requirement is
- * deliberate: slashless remote-name forms (`-R upstream`) are the
- * fork→upstream flow (allowed, documented residual). Anchored
- * `^gh\s` (no `echo gh …`). `repo create|new` is excluded by
- * design; read-only `pr view`/`issue list` never route. See the
+ * with a global flag BEFORE the subcommand, then a gated
+ * `pr create|new|edit|merge` or `issue create|edit`. It only decides
+ * "is this a flag-first gated command?" — all VALUE parsing (flag
+ * identity, target extraction, help carve-out) happens on the walker
+ * argv via `@cad0p/pi-steering-flags`' `hasFlag`/`getFlagValue` in
+ * the rule's `unless` fn (arg layer, quote-aware). The router is
+ * deliberately loose: it also routes non-repo flags (`-v`,
+ * `--hostname`) and slashless `-R upstream` — the `unless` releases
+ * those (they are not repo-targeting / are fork remote-name forms).
+ * Anchored `^gh\s` (no `echo gh …`). `repo create|new` is excluded
+ * by design; read-only `pr view`/`issue list` never route. See the
  * rule doc comment.
  */
 export const REPO_FLAG_ANCHOR =
-  /^gh\s+(?:-R\s+\S*\/\S+|--repo\s+\S*\/\S+|--repo=\S*\/\S+|-R\S*\/\S+)\s+(?:pr\s+(?:create|new|edit|merge)|issue\s+(?:create|edit))\b/i;
+  /^gh\s+-[^\s]+(?:\s+[^\s]+)?\s+(?:pr\s+(?:create|new|edit|merge)|issue\s+(?:create|edit))\b/i;
 
 /**
  * A seed flag as its own token: long or short form, ` ` or `=`
@@ -212,8 +212,10 @@ export const REPO_CREATE_PATTERN = new RegExp(
  * Fires on `pr create|new|edit|merge` and `issue create|edit` only
  * (`repo create|new` is excluded by design — nothing to cd into, the
  * target is the positional argument; read-only forms stay allowed:
- * `pr view`, `issue list`, `--help`/`-h`). Slashless values
- * (`-R upstream`) don't match — documented residual.
+ * `pr view`, `issue list`, `--help`/`-h`). The anchor is a pure
+ * router: it also routes non-repo flags (`-v`, `--hostname`) and
+ * slashless `-R upstream` — the `unless` releases those (not
+ * repo-targeting / fork remote-name form).
  *
  * `unless` — allow when the `-R` target's basename equals the cwd
  * repo's basename (`repoName(ctx, ctx.cwd)` — origin URL basename,
@@ -244,6 +246,26 @@ export const ghRepoFlagBeforeSubcommand = {
     // shape as the merge rule's carve-out; NOT `INFO_ONLY`, whose
     // string-layer `\b` has the quoted-value hole.)
     if (hasFlag(args, "--help") || hasFlag(args, "-h")) return true;
+    // The anchor routes ANY first flag token (pure router). Release
+    // commands whose FIRST flag token is NOT the repo-flag family
+    // (`-v`, `--hostname`, …) — they are not repo-targeting. (Scan
+    // for the first `-`-prefixed token; the walker's `input.args`
+    // excludes the basename `gh`, but the unit-test helper includes
+    // it — scanning is position-robust either way.)
+    let firstFlag: string | null = null;
+    for (const w of args) {
+      const t = w?.text ?? "";
+      if (t.startsWith("-") && t !== "-") {
+        firstFlag = t;
+        break;
+      }
+    }
+    const isRepoFlag =
+      firstFlag === "-R" ||
+      firstFlag === "--repo" ||
+      (firstFlag !== null &&
+        (firstFlag.startsWith("-R") || firstFlag.startsWith("--repo=")));
+    if (!isRepoFlag) return true; // not a repo-targeting command
     // The `-R`/`--repo` target, via `@cad0p/pi-steering-flags`
     // (arg layer, quote-aware, `--flag=value` + `--flag value` forms).
     // Glued short form `-Rcad0p/x` is INVISIBLE to the helpers (the
@@ -252,6 +274,11 @@ export const ghRepoFlagBeforeSubcommand = {
     // cad0p/pi-steering-flags#11).
     const target = getFlagValue(args, "-R") ?? getFlagValue(args, "--repo");
     if (target === null || target === "") return false; // fail-closed
+    // Slashless remote-name forms (`-R upstream`) are the fork→
+    // upstream flow — release (the anchor now routes them; the old
+    // anchor never did). A `/`-containing target is required to be a
+    // foreign-owner/repo redirect.
+    if (!target.includes("/")) return true;
     const cwd = ctx.cwd;
     if (typeof cwd !== "string" || cwd === "unknown") return false;
     const repo = await repoName(ctx, cwd);

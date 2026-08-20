@@ -83,7 +83,7 @@ describe("github plugin — pattern constants", () => {
 });
 
 describe("github plugin — gh-repo-flag-before-subcommand (normalized form)", () => {
-  it("routes -R/--repo BEFORE the subcommand with a /-containing target", () => {
+  it("routes flag-first gated commands (pure router: any flag token)", () => {
     assert.equal(
       blocked(REPO_FLAG_ANCHOR, "gh -R cad0p/x pr create --title t"),
       true,
@@ -120,11 +120,23 @@ describe("github plugin — gh-repo-flag-before-subcommand (normalized form)", (
     );
   });
 
-  it("does not route slashless remotes, read-only forms, excluded subcommands, or -R after the subcommand", () => {
+  it("pure router also routes non-repo flags and slashless -R (the unless releases them)", () => {
+    // The router deliberately does NOT decide flag identity or the
+    // `/` requirement — those live in the `unless` fn (arg layer).
+    // Non-repo flags and slashless remote-name forms route but are
+    // released by the `unless` (pinned in the unless describe).
+    assert.equal(blocked(REPO_FLAG_ANCHOR, "gh -v pr create --title t"), true);
+    assert.equal(
+      blocked(REPO_FLAG_ANCHOR, "gh --hostname x pr create --title t"),
+      true,
+    );
     assert.equal(
       blocked(REPO_FLAG_ANCHOR, "gh -R upstream pr create --title t"),
-      false,
+      true,
     );
+  });
+
+  it("does not route read-only forms, excluded subcommands, or -R after the subcommand", () => {
     assert.equal(blocked(REPO_FLAG_ANCHOR, "gh -R cad0p/x pr view 12"), false);
     assert.equal(blocked(REPO_FLAG_ANCHOR, "gh -R cad0p/x issue list"), false);
     assert.equal(
@@ -441,6 +453,29 @@ describe("github plugin — gh-repo-flag-before-subcommand unless (basename matc
         remote: "https://github.com/cad0p/pi-steering-github.git",
       },
     );
+    assert.equal(await ghRepoFlagBeforeSubcommand.unless!(ctx), true);
+  });
+
+  it("releases non-repo flags the router now routes (-v, --hostname)", async () => {
+    // The pure-router anchor routes ANY first flag token; the unless
+    // releases commands whose first flag is not the repo-flag family.
+    const vCtx = ctxWith("gh -v pr create --title t", {
+      remote: "https://github.com/cad0p/pi-steering-github.git",
+    });
+    assert.equal(await ghRepoFlagBeforeSubcommand.unless!(vCtx), true);
+    const hCtx = ctxWith("gh --hostname x pr create --title t", {
+      remote: "https://github.com/cad0p/pi-steering-github.git",
+    });
+    assert.equal(await ghRepoFlagBeforeSubcommand.unless!(hCtx), true);
+  });
+
+  it("releases slashless -R upstream (fork remote-name form)", async () => {
+    // `gh -R upstream pr create` — the anchor now routes it; the
+    // unless releases it (no `/` → not a foreign owner/repo redirect;
+    // matches the old anchor's never-routed allowance).
+    const ctx = ctxWith("gh -R upstream pr create --title t", {
+      remote: "https://github.com/cad0p/pi-steering-github.git",
+    });
     assert.equal(await ghRepoFlagBeforeSubcommand.unless!(ctx), true);
   });
 
