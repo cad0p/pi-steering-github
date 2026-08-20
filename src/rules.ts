@@ -41,6 +41,8 @@
  *      optional at merge (relaxed from BOTH channels on 2026-08-16,
  *      user decision: the body requirement was redundant friction;
  *      the reason text now matches enforcement).
+ *      `--help`/`-h` (read-only introspection) never blocks — no
+ *      merge is requested.
  *
  *   4. `issue-body-from-vault-file`
  *      `gh issue create|edit` must take the body from the same
@@ -141,15 +143,28 @@ export const PR_BODY_ANCHOR = /^gh\s+pr\s+(?:create|new|edit)\b/i;
 export const PR_CREATE_ANCHOR = /^gh\s+pr\s+(?:create|new)\b/i;
 
 /**
+ * `gh` help flag as its own TOKEN (token-boundary guarded): `--help`
+ * or `-h` preceded by start/space and followed by space/end. A
+ * read-only introspection request — never a merge. The guard kills
+ * glued lookalikes (`--helper`, `-hx`) that a bare `(?:--help|-h)`
+ * alternative would falsely match inside a word (verified: with the
+ * `i` flag, `--helper` contains `-h`).
+ */
+export const HELP_FLAG = `(?:^|\\s)(?:--help|-h)(?=\\s|$)`;
+
+/**
  * `pr-merge-needs-closing-keywords` pattern: fires unless the command
  * carries a closing-keyword ref in the `--subject` value (short
- * `-t` form, `--flag=value` forms). The commit subject is part of
- * the squash commit message — GitHub scans the whole message for
- * closing keywords, so the subject channel alone closes the issues
- * (the commit body is optional at merge).
+ * `-t` form, `--flag=value` forms) or is a read-only `--help`/`-h`
+ * introspection (never a merge — exempted). The commit subject is
+ * part of the squash commit message — GitHub scans the whole message
+ * for closing keywords, so the subject channel alone closes the
+ * issues (the commit body is optional at merge).
  */
 export const PR_MERGE_PATTERN = new RegExp(
-  `^gh\\s+pr\\s+merge\\b(?!` + `[\\s\\S]*${SUBJECT_WITH_REF}` + `)`,
+  `^gh\\s+pr\\s+merge\\b(?!` +
+    `(?:[\\s\\S]*${HELP_FLAG}` + // --help/-h token anywhere → exempt (read-only)
+    `|[\\s\\S]*${SUBJECT_WITH_REF}))`, // …or a --subject closing ref
   "i",
 );
 

@@ -110,6 +110,7 @@ export {
   BODY_WITH_REF,
   CLOSING_KEYWORD,
   ghRepoCreateNeedsSeed,
+  HELP_FLAG,
   ISSUE_BODY_ANCHOR,
   ISSUE_REF,
   issueBodyFromVaultFile,

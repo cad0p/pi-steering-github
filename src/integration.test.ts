@@ -554,6 +554,53 @@ describe("github plugin — PR rules (issue-link + vault body-file policy)", () 
     assert.equal(rule, "pr-merge-needs-closing-keywords");
   });
 
+  it("allows pr merge --help (read-only introspection, issue #17 repro)", async () => {
+    const { block, rule } = await evaluateBash(
+      makeFixtureDir(),
+      `gh pr merge --help`,
+      host,
+    );
+    assert.equal(block, false, `expected allow, got block by ${rule}`);
+  });
+
+  it("allows pr merge -h (short help flag)", async () => {
+    const { block, rule } = await evaluateBash(
+      makeFixtureDir(),
+      `gh pr merge -h`,
+      host,
+    );
+    assert.equal(block, false, `expected allow, got block by ${rule}`);
+  });
+
+  it("blocks pr merge --squash (no --help, no closing keyword)", async () => {
+    const { block, rule } = await evaluateBash(
+      makeFixtureDir(),
+      `gh pr merge --squash`,
+      host,
+    );
+    assert.equal(block, true, "expected block");
+    assert.equal(rule, "pr-merge-needs-closing-keywords");
+  });
+
+  it("blocks bare pr merge (no args — real merge of current-branch PR)", async () => {
+    const { block, rule } = await evaluateBash(
+      makeFixtureDir(),
+      `gh pr merge`,
+      host,
+    );
+    assert.equal(block, true, "expected block");
+    assert.equal(rule, "pr-merge-needs-closing-keywords");
+  });
+
+  it("allows pr merge --squash --subject with a closing keyword (unchanged)", async () => {
+    const { block, rule } = await evaluateBash(
+      makeFixtureDir(),
+      `gh pr merge --squash --subject "feat: x (closes #12)"`,
+      host,
+    );
+    assert.equal(block, false, `expected allow, got block by ${rule}`);
+  });
+
   it("does not gate other gh subcommands (view / branch / close)", async () => {
     const { block, rule } = await evaluateBash(
       makeFixtureDir(),

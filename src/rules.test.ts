@@ -24,6 +24,7 @@ import {
   BODY_WITH_REF,
   CLOSING_KEYWORD,
   ghRepoCreateNeedsSeed,
+  HELP_FLAG,
   ISSUE_BODY_ANCHOR,
   ISSUE_REF,
   issueBodyFromVaultFile,
@@ -100,6 +101,54 @@ describe("github plugin — command anchors (normalized form)", () => {
     assert.equal(blocked(PR_MERGE_PATTERN, "gh pr merge --squash"), true);
     assert.equal(blocked(PR_MERGE_PATTERN, "gh pr create --title x"), false);
     assert.equal(blocked(PR_MERGE_PATTERN, "gh pr view 46"), false);
+  });
+
+  it("pr-merge-needs-closing-keywords: --help/-h (read-only) never blocks", () => {
+    // The issue's repro: read-only introspection must pass through.
+    assert.equal(blocked(PR_MERGE_PATTERN, "gh pr merge --help"), false);
+    assert.equal(blocked(PR_MERGE_PATTERN, "gh pr merge -h"), false);
+    assert.equal(
+      blocked(PR_MERGE_PATTERN, "gh pr merge --squash --help"),
+      false,
+    );
+    assert.equal(
+      blocked(PR_MERGE_PATTERN, "gh pr merge --help --squash"),
+      false,
+    );
+    // Bare merge is a REAL merge (current-branch PR) — must stay gated.
+    assert.equal(blocked(PR_MERGE_PATTERN, "gh pr merge"), true);
+    // Glued lookalikes must NOT exempt (token-boundary guard).
+    assert.equal(
+      blocked(PR_MERGE_PATTERN, "gh pr merge --squash --helper"),
+      true,
+    );
+    assert.equal(blocked(PR_MERGE_PATTERN, "gh pr merge --squash -hx"), true);
+    // --help=value is not a help flag.
+    assert.equal(
+      blocked(PR_MERGE_PATTERN, "gh pr merge --squash --help="),
+      true,
+    );
+    // Help + a valid closing subject: exempt either way.
+    assert.equal(
+      blocked(
+        PR_MERGE_PATTERN,
+        "gh pr merge --squash --subject fix: x (closes #12) --help",
+      ),
+      false,
+    );
+  });
+
+  it("HELP_FLAG is a token-boundary-guarded help token", () => {
+    const re = new RegExp(HELP_FLAG, "i");
+    // Genuine help tokens match.
+    assert.equal(re.test(" --help"), true);
+    assert.equal(re.test("--help "), true);
+    assert.equal(re.test(" -h"), true);
+    assert.equal(re.test("-h"), true);
+    // Glued lookalikes never match.
+    assert.equal(re.test("--helper"), false);
+    assert.equal(re.test("-hx"), false);
+    assert.equal(re.test("--help="), false);
   });
 
   it("issue-body-from-vault-file anchors issue create/edit only", () => {
