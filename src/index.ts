@@ -21,15 +21,19 @@
  *     constants, and the arg helpers re-exported for unit tests and
  *     `when.condition` escape-hatch use.
  *
- * The plugin ships five rules, all STRICT (no `noOverride: false` —
+ * The plugin ships six rules, all STRICT (no `noOverride: false` —
  * the schema defaults fail-closed, so the policy is unconditional):
  *
+ *   - `gh-repo-flag-before-subcommand` — `-R`/`--repo` before the
+ *                                      subcommand targeting a foreign
+ *                                      repo gets redirected (first in
+ *                                      the roster).
  *   - `pr-body-from-vault-file`      — PR bodies come from vault
  *                                      body files under `<repo>/prs/`.
  *   - `pr-create-needs-issue-link`   — closing keyword + `#N` in
  *                                      BOTH title and body.
  *   - `pr-merge-needs-closing-keywords` — closing keyword + `#N` in
- *                                      BOTH `--subject` and `--body`.
+ *                                      the `--subject` value.
  *   - `issue-body-from-vault-file`   — issue bodies come from vault
  *                                      body files under `<repo>/issues/`.
  *   - `gh-repo-create-needs-seed`    — `gh repo create|new` must
@@ -74,12 +78,15 @@ declare global {
  * `defineConfig`'s plugin-name / predicate-name inference (typo
  * checking on `disabledRules` / `disabledPlugins`).
  *
- * Rule order comes from `rules` (first-match-wins): the vault
- * body-file rule runs FIRST so the agent writes the body file before
- * fiddling with keywords, then the issue-link rule, then merge, then
- * the issue body-file rule, then `gh-repo-create-needs-seed` (no
- * anchor overlap — `gh repo …` shares no prefix with the
- * `gh pr|issue …` anchors). See `./rules.ts` for the rationale.
+ * Rule order comes from `rules` (first-match-wins): the
+ * `gh-repo-flag-before-subcommand` entry gate runs FIRST — the `-R`
+ * attempt is the entry step of the foreign flow, so the redirect
+ * must be the first rule the agent can meet (its `^gh\s+(?:-R|--repo)`
+ * anchor is disjoint from the others' `^gh\s+(?:pr|issue|repo)`
+ * anchors). Then the vault body-file rule (write the body file
+ * before fiddling with keywords), then the issue-link rule, then
+ * merge, then the issue body-file rule, then `gh-repo-create-needs-seed`.
+ * See `./rules.ts` for the rationale.
  */
 export const githubPlugin = {
   name: "github",
@@ -97,6 +104,7 @@ export {
   findFlagValue,
   missingVaultBodyFile,
   parseBodyFileArg,
+  repoName,
   resolveAgainstCwd,
   unquote,
 } from "./predicates/missing-vault-body-file.ts";
@@ -109,19 +117,25 @@ export {
 export {
   BODY_WITH_REF,
   CLOSING_KEYWORD,
+  foreignRepoReason,
   ghRepoCreateNeedsSeed,
+  ghRepoFlagBeforeSubcommand,
+  HELP_FLAG,
   ISSUE_BODY_ANCHOR,
   ISSUE_REF,
   issueBodyFromVaultFile,
   PR_BODY_ANCHOR,
   PR_CREATE_ANCHOR,
   PR_MERGE_PATTERN,
+  parseRepoFlagTarget,
   prBodyFromVaultFile,
   prCreateNeedsIssueLink,
   prMergeNeedsClosingKeywords,
   REPO_CREATE_ANCHOR,
   REPO_CREATE_PATTERN,
   REPO_CREATE_SEED_FLAG,
+  REPO_FLAG,
+  REPO_FLAG_ANCHOR,
   rules,
   SUBJECT_WITH_REF,
   TITLE_WITH_REF,
