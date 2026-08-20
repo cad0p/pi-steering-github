@@ -7,7 +7,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { REPO_CREATE_PATTERN } from "./index.ts";
+import { REPO_CREATE_PATTERN } from "./patterns.ts";
 
 function blocked(pattern: string | RegExp, normalized: string): boolean {
   const re = pattern instanceof RegExp ? pattern : new RegExp(pattern);

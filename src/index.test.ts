@@ -3,12 +3,12 @@
 
 /**
  * Roster-order pin + reason-string byte-identity pins for the rules
- * roster.
+ * roster (assembled in `./index.ts`).
  */
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { BODY_STRIP } from "../helpers/body-strip.ts";
+import { BODY_STRIP } from "./helpers/body-strip.ts";
 import {
   ghRepoCreateNeedsSeed,
   issueBodyFromVaultFile,

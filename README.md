@@ -27,7 +27,8 @@ The package mirrors the canonical `examples/work-item-plugin` layout — one fil
 
 ```
 src/
-├── index.ts                        # plugin assembly + declare global + re-exports
+├── index.ts                        # plugin assembly + roster + declare global + re-exports
+├── index.test.ts                   # roster-order pin + reason-string byte-identity pins
 ├── integration.test.ts             # end-to-end pipeline tests
 ├── helpers/
 │   ├── body-strip.ts                # the pinned perl body-strip one-liner (leaf)
@@ -38,11 +39,9 @@ src/
 │   ├── body-keyword.test.ts
 │   └── repo-name.ts                # repoName
 ├── predicates/
-│   ├── index.ts                    # bundle re-exports
 │   ├── missing-vault-body-file.ts  # the predicate handler
 │   └── missing-vault-body-file.test.ts
 └── rules/
-    ├── index.ts                    # the rules roster + bundle re-exports
     ├── patterns.ts                 # pattern constants (leaf)
     ├── patterns.test.ts
     ├── command-anchors.test.ts

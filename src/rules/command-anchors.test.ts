@@ -17,7 +17,7 @@ import {
   PR_MERGE_ANCHOR,
   REPO_CREATE_PATTERN,
   REPO_FLAG_ANCHOR,
-} from "./index.ts";
+} from "./patterns.ts";
 
 function blocked(pattern: string | RegExp, normalized: string): boolean {
   const re = pattern instanceof RegExp ? pattern : new RegExp(pattern);

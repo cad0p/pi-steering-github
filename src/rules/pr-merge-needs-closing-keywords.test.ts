@@ -7,7 +7,8 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { PR_MERGE_ANCHOR, prMergeNeedsClosingKeywords } from "./index.ts";
+import { PR_MERGE_ANCHOR } from "./patterns.ts";
+import { prMergeNeedsClosingKeywords } from "./pr-merge-needs-closing-keywords.ts";
 
 function blocked(pattern: string | RegExp, normalized: string): boolean {
   const re = pattern instanceof RegExp ? pattern : new RegExp(pattern);
