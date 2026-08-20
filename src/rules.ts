@@ -8,7 +8,20 @@
  * policy for gh CLI workflows, layered on top of the napkin vault
  * convention:
  *
- *   1. `pr-body-from-vault-file` (FIRST — write the body first)
+ *   1. `gh-repo-flag-before-subcommand` (FIRST — the entry gate of
+ *      the foreign-repo flow)
+ *      `gh -R x/y pr create|new|edit|merge` and
+ *      `gh -R x/y issue create|edit` (also `--repo`, `--repo=…`,
+ *      `-R…` glued forms) target a FOREIGN repo: the redirect
+ *      blocks and tells the agent to run a foreign subagent
+ *      maintainer loop, then cd into the foreign repo and target it
+ *      from there. Exempt (unless) when the target's basename equals
+ *      the cwd repo's basename (fork→upstream contribution flow).
+ *      Read-only `--help`/`-h` never blocks; `repo create|new` is
+ *      excluded by design (nothing to cd into — the target is the
+ *      positional argument).
+ *
+ *   2. `pr-body-from-vault-file`
  *      `gh pr create|new|edit` must take the body from
  *      `--body-file <(perl -0777 -pe '<BODY_STRIP>' <vault-file>)`
  *      — a process substitution running the pinned perl one-liner
@@ -19,7 +32,7 @@
  *      validated: it must resolve to a real file inside a napkin
  *      vault under `<repo>/prs/` (see `missingVaultBodyFile`).
  *
- *   2. `pr-create-needs-issue-link`
+ *   3. `pr-create-needs-issue-link`
  *      `gh pr create|new` must carry a closing keyword
  *      (close/closes/closed, fix/fixes/fixed, resolve/resolves/resolved)
  *      + `#N` in BOTH the inline `--title` value and the body — the
@@ -33,7 +46,7 @@
  *        - Body keyword → the GitHub "linked issues" sidebar link +
  *          the description-channel auto-close on merge.
  *
- *   3. `pr-merge-needs-closing-keywords`
+ *   4. `pr-merge-needs-closing-keywords`
  *      `gh pr merge` must carry a closing keyword + `#N` in the
  *      `--subject` value (commit subject). GitHub scans the whole
  *      squash commit message for closing keywords, so the commit
@@ -42,12 +55,12 @@
  *      user decision: the body requirement was redundant friction;
  *      the reason text now matches enforcement).
  *
- *   4. `issue-body-from-vault-file`
+ *   5. `issue-body-from-vault-file`
  *      `gh issue create|edit` must take the body from the same
- *      pinned perl substitution as step 1 (under a `<repo>/issues/`
+ *      pinned perl substitution as step 2 (under a `<repo>/issues/`
  *      directory in the vault).
  *
- *   5. `gh-repo-create-needs-seed`
+ *   6. `gh-repo-create-needs-seed`
  *      `gh repo create|new` must carry a seed flag (`--add-readme`,
  *      `--gitignore|-g`, `--license|-l`, `--template|-p`) — a bare
  *      create births an EMPTY repo (no branches, no commits),
@@ -76,11 +89,12 @@
  * the bottom of this file.
  */
 
-import type { Rule } from "@cad0p/pi-steering";
+import type { PredicateContext, Rule } from "@cad0p/pi-steering";
 import { BODY_STRIP } from "./body-strip.ts";
 import {
   bodyHasClosingKeyword,
   findFlagValue,
+  repoName,
 } from "./predicates/missing-vault-body-file.ts";
 
 // ---------------------------------------------------------------------------
@@ -160,6 +174,46 @@ export const ISSUE_BODY_ANCHOR = /^gh\s+issue\s+(?:create|edit)\b/i;
 export const REPO_CREATE_ANCHOR = /^gh\s+repo\s+(?:create|new)\b/i;
 
 /**
+ * A `-R`/`--repo` global-flag token with a `/`-containing value:
+ * `-R x/y` / `--repo x/y` (space form), `--repo=x/y` (glued `=`
+ * form), `-Rx/y` (glued short form). Token-boundary guarded — glued
+ * lookalikes (`foo-R`, `-Rfoo` without a slash) never match. The
+ * `/` requirement is deliberate: slashless remote-name forms
+ * (`-R upstream`) are the fork→upstream flow (allowed, documented
+ * residual) and don't target a foreign owner/repo.
+ */
+export const REPO_FLAG =
+  `(?:^|\\s)(?:-R|--repo)\\s+[^\\s]+\\/[^\\s]+` +
+  `|(?:^|\\s)--repo=[^\\s]+\\/[^\\s]+` +
+  `|(?:^|\\s)-R[^\\s]+\\/[^\\s]+`;
+
+/**
+ * A help flag as its own token: `--help` / `-h`, token-boundary
+ * guarded (same shape as PR #20's `HELP_FLAG`). Read-only
+ * introspection must never block.
+ */
+export const HELP_FLAG = `(?:^|\\s)(?:--help|-h)(?=\\s|$)`;
+
+/**
+ * `gh-repo-flag-before-subcommand` pattern: `-R`/`--repo` BEFORE the
+ * subcommand, targeting an owner/repo (`/`-containing value, all
+ * four typed forms), followed by a gated `pr create|new|edit|merge`
+ * or `issue create|edit`. Read-only `--help`/`-h` anywhere in the
+ * command never matches (token-boundary-guarded `HELP_FLAG`, same
+ * shape as PR #20's). Anchored `^gh\s` (no `echo gh …`).
+ * `repo create|new` is excluded by design. See the rule doc comment.
+ */
+export const REPO_FLAG_ANCHOR = new RegExp(
+  `^gh\\s+(?:-R\\s+[^\\s]+\\/[^\\s]+` +
+    `|--repo\\s+[^\\s]+\\/[^\\s]+` +
+    `|--repo=[^\\s]+\\/[^\\s]+` +
+    `|-R[^\\s]+\\/[^\\s]+)\\s+(?:pr\\s+(?:create|new|edit|merge)` +
+    `|issue\\s+(?:create|edit))\\b` +
+    `(?![\\s\\S]*${HELP_FLAG})`,
+  "i",
+);
+
+/**
  * A seed flag as its own token: long or short form, ` ` or `=`
  * value forms. Token-boundary guarded — glued lookalikes
  * (`foo--add-readme`, `-local`, `-public`) never match.
@@ -176,6 +230,122 @@ export const REPO_CREATE_PATTERN = new RegExp(
   `${REPO_CREATE_ANCHOR.source}(?![\\s\\S]*${REPO_CREATE_SEED_FLAG})`,
   "i",
 );
+
+/**
+ * `gh-repo-flag-before-subcommand` — `gh -R x/y pr|issue …` targets
+ * a FOREIGN repo and must be redirected to the foreign repo's own
+ * config: run a foreign subagent maintainer loop until good, then cd
+ * into the foreign repo and target it from there. This is the ENTRY
+ * step of the foreign flow — FIRST in the roster (pedagogical; the
+ * `^gh\s+(?:-R|--repo)` anchor is disjoint from the other rules'
+ * `^gh\s+(?:pr|issue|repo)` anchors, so first-match routing is
+ * unaffected).
+ *
+ * Fires on `pr create|new|edit|merge` and `issue create|edit` only
+ * (`repo create|new` is excluded by design — nothing to cd into, the
+ * target is the positional argument; read-only forms stay allowed:
+ * `pr view`, `issue list`, `--help`/`-h`). Slashless values
+ * (`-R upstream`) don't match — documented residual.
+ *
+ * `unless` — allow when the `-R` target's basename equals the cwd
+ * repo's basename (`repoName(ctx, ctx.cwd)` — origin URL basename,
+ * cwd-folder fallback): the fork→upstream contribution flow
+ * (`gh -R upstream/foo pr create` from the `me/foo` clone) is the
+ * most common LEGIT `-R` use and must stay allowed. Cost accepted:
+ * `-R <own-repo> pr merge` from inside the repo is indistinguishable
+ * and slips through — heuristic discipline, not security. Fail-
+ * closed: unknown cwd / unresolvable repo / unparsable target →
+ * block.
+ *
+ * Reason is a `ReasonFn` — the plugin's first dynamic reason: the
+ * redirect text echoes the target and subcommand AS TYPED.
+ *
+ * Strict — no override (schema default).
+ */
+export const ghRepoFlagBeforeSubcommand = {
+  name: "gh-repo-flag-before-subcommand",
+  tool: "bash",
+  field: "command",
+  pattern: REPO_FLAG_ANCHOR,
+  unless: async (ctx: PredicateContext) => {
+    const target = parseRepoFlagTarget(ctx);
+    if (target === null) return false; // unparsable target → fail-closed
+    const cwd = ctx.cwd;
+    if (typeof cwd !== "string" || cwd === "unknown") return false;
+    const repo = await repoName(ctx, cwd);
+    // `repoName` falls back to the cwd folder name, which for the
+    // walker-unknown sentinel is the literal string "unknown" (NOT
+    // null) — treat it as no-match (block), like an unresolvable
+    // repo.
+    if (repo === null || repo === "unknown") return false;
+    const targetBase = target.slice(target.lastIndexOf("/") + 1);
+    return targetBase === repo;
+  },
+  reason: (ctx: PredicateContext) => foreignRepoReason(ctx),
+} as const satisfies Rule;
+
+/**
+ * The `-R`/`--repo` target parsed from the walker args: the flag
+ * word (`-R` / `--repo` + next word, `--repo=value` glued,
+ * `-Rvalue` glued). `null` when absent or unparsable (fail-closed).
+ */
+export function parseRepoFlagTarget(ctx: PredicateContext): string | null {
+  const words = ctx.input.args ?? [];
+  for (let i = 0; i < words.length; i++) {
+    const t = words[i]?.text ?? "";
+    if (t === "-R" || t === "--repo") {
+      const value = words[i + 1]?.text ?? "";
+      return value !== "" ? value : null;
+    }
+    if (t.startsWith("--repo=")) {
+      return t.slice("--repo=".length);
+    }
+    if (t.startsWith("-R")) {
+      return t.slice(2);
+    }
+  }
+  return null;
+}
+
+/**
+ * The dynamic block reason for `gh-repo-flag-before-subcommand`:
+ * echoes the subcommand (PR/issue) and the `-R`/`--repo` target AS
+ * TYPED. Never throws — static fallback on unparsable args (the
+ * evaluator's fail-safe would still land the block verdict, but keep
+ * it clean).
+ */
+export function foreignRepoReason(ctx: PredicateContext): string {
+  const words = ctx.input.args ?? [];
+  let flag = "-R";
+  let target: string | null = null;
+  for (let i = 0; i < words.length; i++) {
+    const t = words[i]?.text ?? "";
+    if (t === "-R" || t === "--repo") {
+      flag = t;
+      target = words[i + 1]?.text ?? "";
+      break;
+    }
+    if (t.startsWith("--repo=")) {
+      flag = "--repo=";
+      target = t.slice("--repo=".length);
+      break;
+    }
+    if (t.startsWith("-R")) {
+      flag = "-R";
+      target = t.slice(2);
+      break;
+    }
+  }
+  const what = /\bpr\b/i.test(words.map((w) => w.text).join(" "))
+    ? "PR"
+    : "issue";
+  const via = target !== null && target !== "" ? `${flag} ${target}` : flag;
+  return (
+    `The ${what} you're targeting via ${via} belongs to a foreign repo.\n` +
+    `REQUIREMENT: run a foreign subagent maintainer loop until good,\n` +
+    `then cd into the foreign repo and target it from there.`
+  );
+}
 
 /**
  * `pr-body-from-vault-file` — PR bodies must come from a vault note,
@@ -282,9 +452,7 @@ export const issueBodyFromVaultFile = {
     `Issue bodies must come from a body file in the napkin vault:\n` +
     `  gh issue create --title "..." --body-file ` +
     `<(perl -0777 -pe '${BODY_STRIP}' ` +
-    `<vault>/**/<repo>/issues/YYYY-MM-DD-issue<N>-<slug>.md)\n` +
-    `- If foreign issue: cd to the repo you want to file the issue; ` +
-    `REQUIREMENT: have a foreign subagent maintainer loop before filing`,
+    `<vault>/**/<repo>/issues/YYYY-MM-DD-issue<N>-<slug>.md)\n`,
 } as const satisfies Rule;
 
 /**
@@ -324,17 +492,21 @@ export const ghRepoCreateNeedsSeed = {
  * Suggested rules for the github plugin.
  *
  * **Order matters — first-match-wins** (the engine routes on the
- * first matching rule): `pr-body-from-vault-file` FIRST so the agent
- * writes the vault body file before fiddling with keywords, then the
+ * first matching rule): `gh-repo-flag-before-subcommand` FIRST — the
+ * `-R`/`--repo` attempt is the ENTRY step of the foreign flow, so
+ * the redirect must be the first rule the agent can meet (its
+ * `^gh\s+(?:-R|--repo)` anchor is disjoint from the others'
+ * `^gh\s+(?:pr|issue|repo)` anchors, so first-match routing is
+ * unaffected). Then `pr-body-from-vault-file` so the agent writes
+ * the vault body file before fiddling with keywords, then the
  * issue-link rule, then merge, then the issue body-file rule, then
- * `gh-repo-create-needs-seed` LAST — appended, never reordered: its
- * `^gh\s+repo\s` anchor cannot overlap the four `^gh\s+(?:pr|issue)\s`
- * anchors, so first-match routing is unaffected.
+ * `gh-repo-create-needs-seed` LAST — appended, never reordered.
  * Reordering for stylistic reasons changes which rule an agent sees
  * when several match; pinned via `src/rules.test.ts` (pattern
  * contracts) and asserted end-to-end in `src/integration.test.ts`.
  */
 export const rules = [
+  ghRepoFlagBeforeSubcommand,
   prBodyFromVaultFile,
   prCreateNeedsIssueLink,
   prMergeNeedsClosingKeywords,
