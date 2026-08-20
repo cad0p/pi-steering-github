@@ -243,9 +243,13 @@ export const ghRepoFlagBeforeSubcommand = {
   unless: async (ctx: PredicateContext) => {
     const args = ctx.input.args ?? [];
     // Help is read-only introspection — never a foreign redirect.
-    // Keep this independent -R rule on hasFlag; its token-level
-    // check means a `--help` inside a QUOTED VALUE (`--subject
-    // "see --help"`) does NOT exempt a real gated command.
+    // Keep this independent -R rule on hasFlag with the exact
+    // {--help, -h} set (same token-level semantics as isInfoOnly,
+    // but deliberately NOT its extra --version default: gh pr/issue
+    // subcommands treat --version as an unknown-flag error, never
+    // read-only introspection — see the adopt-flags plan's D2). A
+    // `--help` inside a QUOTED VALUE (`--subject "see --help"`)
+    // does NOT exempt a real gated command.
     if (hasFlag(args, "--help") || hasFlag(args, "-h")) return true;
     // The anchor routes ANY first flag token (pure router). Release
     // commands whose FIRST flag token is NOT the repo-flag family
