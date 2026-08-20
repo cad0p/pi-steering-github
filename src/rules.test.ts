@@ -19,7 +19,6 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { INFO_ONLY } from "@cad0p/pi-steering-flags";
 import { BODY_STRIP } from "./predicates/missing-vault-body-file.ts";
 import {
   BODY_WITH_REF,
@@ -128,30 +127,34 @@ describe("github plugin — command anchors (normalized form)", () => {
 
 describe("github plugin — pr-merge-needs-closing-keywords (normalized form)", () => {
   // The rule now anchors PR_MERGE_ANCHOR only; the help carve-out
-  // lives in `unless: INFO_ONLY` (pi-steering-flags) and the subject
-  // check in `when.condition` — both are exercised end-to-end in
-  // `../integration.test.ts`. This describe pins the ANCHOR surface
-  // (which commands route to the rule at all).
+  // and the subject check live in `when.condition` on the
+  // walker-parsed argv (token-level, quote-aware) — exercised
+  // end-to-end in `../integration.test.ts`. This describe pins the
+  // ANCHOR surface (which commands route to the rule at all).
   it("anchors pr merge only (all forms route to the rule)", () => {
     assert.equal(blocked(PR_MERGE_ANCHOR, "gh pr merge --squash"), true);
     assert.equal(blocked(PR_MERGE_ANCHOR, "gh pr merge"), true);
     assert.equal(blocked(PR_MERGE_ANCHOR, "gh pr merge 123 -s -t x"), true);
-    // The anchor itself does NOT decide help — unless/condition do.
+    // The anchor itself does NOT decide help — the condition does.
     assert.equal(blocked(PR_MERGE_ANCHOR, "gh pr merge --help"), true);
     assert.equal(blocked(PR_MERGE_ANCHOR, "gh pr create --title x"), false);
     assert.equal(blocked(PR_MERGE_ANCHOR, "gh pr view 46"), false);
   });
 
-  it("the rule carries the INFO_ONLY unless + a subject condition", () => {
+  it("the rule gates via when.condition only (no string-level unless)", () => {
+    const rule = prMergeNeedsClosingKeywords as unknown as {
+      unless?: unknown;
+      when?: { condition?: unknown };
+    };
     assert.equal(
-      prMergeNeedsClosingKeywords.unless,
-      INFO_ONLY,
-      "unless must be the pi-steering-flags INFO_ONLY carve-out",
+      rule.unless,
+      undefined,
+      "no unless — the help carve-out must be token-level, not string-level",
     );
     assert.equal(
-      typeof prMergeNeedsClosingKeywords.when?.condition,
+      typeof rule.when?.condition,
       "function",
-      "subject keyword check must live in when.condition",
+      "help carve-out + subject keyword check must live in when.condition",
     );
   });
 });

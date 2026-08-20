@@ -77,11 +77,12 @@
  */
 
 import type { Rule } from "@cad0p/pi-steering";
-import { INFO_ONLY } from "@cad0p/pi-steering-flags";
+import { hasFlag } from "@cad0p/pi-steering-flags";
 import { BODY_STRIP } from "./body-strip.ts";
 import {
   bodyHasClosingKeyword,
   findFlagValue,
+  unquote,
 } from "./predicates/missing-vault-body-file.ts";
 
 // ---------------------------------------------------------------------------
@@ -144,11 +145,12 @@ export const PR_CREATE_ANCHOR = /^gh\s+pr\s+(?:create|new)\b/i;
 /**
  * `pr-merge-needs-closing-keywords` anchor: pr merge only. Fires
  * unless the command carries a closing-keyword ref in the `--subject`
- * value (short `-t` form, `--flag=value` forms) — the subject check
- * lives in `when.condition` against the walker-parsed argv, and the
- * `--help`/`-h` read-only carve-out lives in `unless: INFO_ONLY`
- * (`@cad0p/pi-steering-flags`). The commit subject is part of the
- * squash commit message — GitHub scans the whole message for closing
+ * value (short `-t` form, `--flag=value` forms) — the help carve-out
+ * and the subject check both live in `when.condition` against the
+ * walker-parsed argv (token-level, quote-aware: a `--help` token
+ * INSIDE a quoted value never exempts, and gh's last-flag-wins
+ * precedence is honored). The commit subject is part of the squash
+ * commit message — GitHub scans the whole message for closing
  * keywords, so the subject channel alone closes the issues (the
  * commit body is optional at merge).
  */
@@ -254,10 +256,31 @@ export const prMergeNeedsClosingKeywords = {
   tool: "bash",
   field: "command",
   pattern: PR_MERGE_ANCHOR,
-  unless: INFO_ONLY,
   when: {
     condition: async (ctx) => {
-      const subject = findFlagValue(ctx, ["--subject", "-t"]);
+      const args = ctx.input.args ?? [];
+      // Help is read-only introspection — never a merge. Token-level
+      // (exact flag tokens on the walker argv, quote-aware): a `--help`
+      // inside a QUOTED VALUE (`--subject "see --help"`) does NOT
+      // exempt — that value is still a real merge subject.
+      const help = hasFlag(args, "--help") || hasFlag(args, "-h");
+      if (help) return false;
+      // gh/cobra semantics: the LAST flag occurrence wins. Scan from
+      // the end so `-t 'see #13' --subject 'closes #12'` uses the
+      // `--subject` value (a bare `-t` earlier in the line is
+      // overridden, not blocking).
+      let subject: string | null = null;
+      for (let i = args.length - 1; i >= 0; i--) {
+        const t = args[i]?.text ?? "";
+        if (t === "--subject" || t === "-t") {
+          subject = unquote(args[i + 1]?.text ?? "");
+          break;
+        }
+        if (t.startsWith("--subject=")) {
+          subject = unquote(t.slice("--subject=".length));
+          break;
+        }
+      }
       const subjectOk =
         subject !== null && new RegExp(ISSUE_REF, "i").test(subject);
       return !subjectOk;
