@@ -17,7 +17,7 @@
  */
 
 import type { Rule } from "@cad0p/pi-steering";
-import { BODY_STRIP } from "../body-strip.ts";
+import { BODY_STRIP } from "../helpers/body-strip.ts";
 import { PR_BODY_ANCHOR } from "./patterns.ts";
 
 export const prBodyFromVaultFile = {

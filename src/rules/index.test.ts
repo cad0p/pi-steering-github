@@ -8,7 +8,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { BODY_STRIP } from "../body-strip.ts";
+import { BODY_STRIP } from "../helpers/body-strip.ts";
 import {
   ghRepoCreateNeedsSeed,
   issueBodyFromVaultFile,

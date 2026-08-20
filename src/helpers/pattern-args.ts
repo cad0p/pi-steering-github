@@ -15,7 +15,7 @@
 
 import { isAbsolute, resolve } from "node:path";
 import type { PredicateContext } from "@cad0p/pi-steering";
-import { BODY_STRIP } from "../body-strip.ts";
+import { BODY_STRIP } from "./body-strip.ts";
 
 export { BODY_STRIP };
 

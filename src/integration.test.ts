@@ -38,7 +38,7 @@ import {
   mockExtensionContext,
 } from "@cad0p/pi-steering/testing";
 import type { ExecResult } from "@earendil-works/pi-coding-agent";
-import { BODY_STRIP } from "./body-strip.ts";
+import { BODY_STRIP } from "./helpers/body-strip.ts";
 import { githubPlugin } from "./index.ts";
 
 const config = defineConfig({ plugins: [githubPlugin] });

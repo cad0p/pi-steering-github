@@ -29,9 +29,9 @@ The package mirrors the canonical `examples/work-item-plugin` layout — one fil
 src/
 ├── index.ts                        # plugin assembly + declare global + re-exports
 ├── integration.test.ts             # end-to-end pipeline tests
-├── body-strip.ts                   # the pinned perl body-strip one-liner (leaf)
-├── body-strip.test.ts              # perl behavior pins (fixture matrix)
 ├── helpers/
+│   ├── body-strip.ts                # the pinned perl body-strip one-liner (leaf)
+│   ├── body-strip.test.ts           # perl behavior pins (fixture matrix)
 │   ├── pattern-args.ts             # argText, unquote, findFlagValue, findBodyFileValue, parseBodyFileArg, resolveAgainstCwd
 │   ├── pattern-args.test.ts
 │   ├── body-keyword.ts             # bodyHasClosingKeyword
