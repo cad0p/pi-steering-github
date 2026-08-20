@@ -50,7 +50,7 @@ import {
 import { isNapkinVaultDir } from "@cad0p/pi-napkin/steering";
 import type { PredicateContext, PredicateHandler } from "@cad0p/pi-steering";
 import { BODY_STRIP } from "../body-strip.ts";
-import { ISSUE_REF } from "../rules.ts";
+import { ISSUE_REF } from "../rules/patterns.ts";
 
 export { BODY_STRIP };
 
