@@ -25,6 +25,7 @@ All notable changes to this project will be documented in this file.
 
 - *(rules)* Adopt @cad0p/pi-steering-flags for the -R redirect gate (closes #19)
 - Adopt token-level info-only carve-out (closes #24)
+- Src/ per-item layout (work-item-plugin structure) (closes #31)
 
 ### 📚 Documentation
 
