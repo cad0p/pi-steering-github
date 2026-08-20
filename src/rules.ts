@@ -318,23 +318,29 @@ export function foreignRepoReason(ctx: PredicateContext): string {
   const words = ctx.input.args ?? [];
   let flag = "-R";
   let target: string | null = null;
+  let subIndex = -1; // index of the subcommand word (pr/issue)
   for (let i = 0; i < words.length; i++) {
     const t = words[i]?.text ?? "";
     if (t === "-R" || t === "--repo") {
       flag = t;
       target = words[i + 1]?.text ?? "";
+      subIndex = i + 2;
       break;
     }
     if (t.startsWith("--repo=") || t.startsWith("-R")) {
       // Glued form: the flag+value is ONE word — echo it verbatim
       // ("--repo=cad0p/x", "-Rcad0p/x").
       flag = t;
+      subIndex = i + 1;
       break;
     }
   }
-  const what = /\bpr\b/i.test(words.map((w) => w.text).join(" "))
-    ? "PR"
-    : "issue";
+  // The subcommand is positionally determined (the word right after
+  // the flag+value) — scanning the whole command for /\bpr\b/ could
+  // mislabel an issue command whose title/subject mentions "pr"
+  // (or a target like `cad0p/pr-mirror`).
+  const sub = words[subIndex]?.text ?? "";
+  const what = sub === "pr" ? "PR" : "issue";
   // Space form: `-R <target>` / `--repo <target>`. Glued form: the
   // word IS the flag+value (`--repo=x/y`, `-Rx/y`) — echo verbatim.
   const via = target !== null && target !== "" ? `${flag} ${target}` : flag;
