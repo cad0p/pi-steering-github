@@ -20,6 +20,10 @@ All notable changes to this project will be documented in this file.
 - *(rules)* Merge gate requires the closing keyword in --subject only (closes #15)
 - (closes #17) pr-merge gate must not block gh pr merge --help
 
+### 🚜 Refactor
+
+- *(rules)* Adopt @cad0p/pi-steering-flags for the -R redirect gate (closes #19)
+
 ### 📚 Documentation
 
 - Fix stale H1-kept comments — the H1 is stripped too (closes #3)
