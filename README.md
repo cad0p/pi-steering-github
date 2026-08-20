@@ -82,7 +82,7 @@ FORM + vault-path check — the substitution must be the pinned form AND the fil
 
 ### `pr-merge-needs-closing-keywords`
 
-`gh pr merge` must carry a closing keyword + `#N` in the `--subject` value (commit subject) — short `-t` form, `--flag=value` forms. GitHub scans the whole squash commit message for closing keywords, so the commit subject alone closes the issues; the commit body is optional at merge. `--help`/`-h` (read-only introspection) never blocks — the rule carves them out via `unless: INFO_ONLY` from `@cad0p/pi-steering-flags`; the subject check runs against the walker-parsed argv (`when.condition`), so a help token inside a `--subject` value can't falsely exempt.
+`gh pr merge` must carry a closing keyword + `#N` in the `--subject` value (commit subject) — short `-t` form, `--flag=value` forms. GitHub scans the whole squash commit message for closing keywords, so the commit subject alone closes the issues; the commit body is optional at merge. `--help`/`-h` (read-only introspection) never blocks — a token-level carve-out via `hasFlag` from `@cad0p/pi-steering-flags` inside `when.condition`; the subject check also runs against the walker-parsed argv, so a help token inside a `--subject` value can't falsely exempt.
 
 ### `issue-body-from-vault-file`
 
