@@ -526,6 +526,7 @@ export const ghRepoCreateNeedsSeed = {
  * contracts) and asserted end-to-end in `src/integration.test.ts`.
  */
 export const rules = [
+  ghRepoFlagBeforeSubcommand,
   prBodyFromVaultFile,
   prCreateNeedsIssueLink,
   prMergeNeedsClosingKeywords,
