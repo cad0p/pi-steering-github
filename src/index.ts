@@ -21,7 +21,7 @@
  *     constants, and the arg helpers re-exported for unit tests and
  *     `when.condition` escape-hatch use.
  *
- * The plugin ships five rules, all STRICT (no `noOverride: false` —
+ * The plugin ships six rules, all STRICT (no `noOverride: false` —
  * the schema defaults fail-closed, so the policy is unconditional):
  *
  *   - `pr-body-from-vault-file`      — PR bodies come from vault
@@ -38,6 +38,11 @@
  *                                      carry a seed flag; a bare
  *                                      create births an EMPTY repo.
  *
+ *   - `gh-repo-flag-before-subcommand` — flag-first `gh -R x/y
+ *                                      pr|issue …` targets a FOREIGN
+ *                                      repo — redirect (foreign
+ *                                      subagent maintainer loop).
+ *
  * See this package's README for usage examples and the per-rule
  * rationale, and the pi-steering README "Writing plugins" section for
  * the design rationale.
@@ -46,11 +51,23 @@
  * `import "@cad0p/pi-steering-github"` pulls the registry
  * augmentation in transitively — `when: { missingVaultBodyFile: … }`
  * typechecks in user configs without a separate type-only import.
+ *
+ * Layout mirrors the canonical `examples/work-item-plugin` shape
+ * (ADR §15): the per-item rule / predicate / helper files live in
+ * `./rules/`, `./predicates/`, `./helpers/`, and THIS module is the
+ * single assembly point — it deep-imports the per-item files, builds
+ * the `rules` roster (order = first-match-wins, see below) and the
+ * plugin object, and re-exports the public surface.
  */
 
-import type { Plugin, PredicateShape } from "@cad0p/pi-steering";
+import type { Plugin, PredicateShape, Rule } from "@cad0p/pi-steering";
 import { missingVaultBodyFile } from "./predicates/missing-vault-body-file.ts";
-import { rules } from "./rules.ts";
+import { ghRepoCreateNeedsSeed } from "./rules/gh-repo-create-needs-seed.ts";
+import { ghRepoFlagBeforeSubcommand } from "./rules/gh-repo-flag-before-subcommand.ts";
+import { issueBodyFromVaultFile } from "./rules/issue-body-from-vault-file.ts";
+import { prBodyFromVaultFile } from "./rules/pr-body-from-vault-file.ts";
+import { prCreateNeedsIssueLink } from "./rules/pr-create-needs-issue-link.ts";
+import { prMergeNeedsClosingKeywords } from "./rules/pr-merge-needs-closing-keywords.ts";
 
 declare global {
   interface PiSteeringPredicates {
@@ -68,6 +85,28 @@ declare global {
 }
 
 /**
+ * The rules roster, in first-match-wins order (the engine routes on
+ * the first matching rule): `pr-body-from-vault-file` FIRST so the
+ * agent writes the vault body file before fiddling with keywords,
+ * then the issue-link rule, then merge, then the issue body-file
+ * rule, then `gh-repo-create-needs-seed` LAST — appended, never
+ * reordered: its `^gh\s+repo\s` anchor cannot overlap the four
+ * `^gh\s+(?:pr|issue)\s` anchors, so first-match routing is
+ * unaffected.
+ * Reordering for stylistic reasons changes which rule an agent sees
+ * when several match; pinned via `src/index.test.ts` (roster order)
+ * and asserted end-to-end in `src/integration.test.ts`.
+ */
+export const rules = [
+  ghRepoFlagBeforeSubcommand,
+  prBodyFromVaultFile,
+  prCreateNeedsIssueLink,
+  prMergeNeedsClosingKeywords,
+  issueBodyFromVaultFile,
+  ghRepoCreateNeedsSeed,
+] as const satisfies readonly Rule[];
+
+/**
  * The github plugin. Default export so `import githubPlugin from
  * "@cad0p/pi-steering-github"` gives you the whole thing.
  *
@@ -81,7 +120,8 @@ declare global {
  * fiddling with keywords, then the issue-link rule, then merge, then
  * the issue body-file rule, then `gh-repo-create-needs-seed` (no
  * anchor overlap — `gh repo …` shares no prefix with the
- * `gh pr|issue …` anchors). See `./rules.ts` for the rationale.
+ * `gh pr|issue …` anchors). See the `rules` doc comment above for
+ * the rationale.
  */
 export const githubPlugin = {
   name: "github",
@@ -91,17 +131,15 @@ export const githubPlugin = {
 
 export default githubPlugin;
 
+export { bodyHasClosingKeyword } from "./helpers/body-keyword.ts";
 export {
   argText,
-  BODY_STRIP,
-  bodyHasClosingKeyword,
   findBodyFileValue,
   findFlagValue,
-  missingVaultBodyFile,
   parseBodyFileArg,
   resolveAgainstCwd,
   unquote,
-} from "./predicates/missing-vault-body-file.ts";
+} from "./helpers/pattern-args.ts";
 // Named re-exports for consumers that want to pick pieces: the
 // shipped rules (or the `rules` roster itself), the pattern constants
 // (pinned by the unit tests), the predicate handler, and the arg
@@ -111,22 +149,25 @@ export {
 export {
   BODY_WITH_REF,
   CLOSING_KEYWORD,
-  ghRepoCreateNeedsSeed,
-  ghRepoFlagBeforeSubcommand,
   ISSUE_BODY_ANCHOR,
   ISSUE_REF,
-  issueBodyFromVaultFile,
   PR_BODY_ANCHOR,
   PR_CREATE_ANCHOR,
   PR_MERGE_ANCHOR,
-  prBodyFromVaultFile,
-  prCreateNeedsIssueLink,
-  prMergeNeedsClosingKeywords,
   REPO_CREATE_ANCHOR,
   REPO_CREATE_PATTERN,
   REPO_CREATE_SEED_FLAG,
   REPO_FLAG_ANCHOR,
-  rules,
   SUBJECT_WITH_REF,
   TITLE_WITH_REF,
-} from "./rules.ts";
+} from "./helpers/patterns.ts";
+export {
+  BODY_STRIP,
+  missingVaultBodyFile,
+} from "./predicates/missing-vault-body-file.ts";
+export { ghRepoCreateNeedsSeed } from "./rules/gh-repo-create-needs-seed.ts";
+export { ghRepoFlagBeforeSubcommand } from "./rules/gh-repo-flag-before-subcommand.ts";
+export { issueBodyFromVaultFile } from "./rules/issue-body-from-vault-file.ts";
+export { prBodyFromVaultFile } from "./rules/pr-body-from-vault-file.ts";
+export { prCreateNeedsIssueLink } from "./rules/pr-create-needs-issue-link.ts";
+export { prMergeNeedsClosingKeywords } from "./rules/pr-merge-needs-closing-keywords.ts";
