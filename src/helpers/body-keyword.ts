@@ -19,7 +19,6 @@
 
 import { readFileSync } from "node:fs";
 import type { PredicateContext } from "@cad0p/pi-steering";
-import { ISSUE_REF } from "../rules/patterns.ts";
 import { BODY_STRIP } from "./body-strip.ts";
 import {
   findBodyFileValue,
@@ -27,6 +26,7 @@ import {
   parseBodyFileArg,
   resolveAgainstCwd,
 } from "./pattern-args.ts";
+import { ISSUE_REF } from "./patterns.ts";
 
 export async function bodyHasClosingKeyword(
   ctx: PredicateContext,

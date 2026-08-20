@@ -16,7 +16,7 @@
 
 import type { Rule } from "@cad0p/pi-steering";
 import { BODY_STRIP } from "../helpers/body-strip.ts";
-import { ISSUE_BODY_ANCHOR } from "./patterns.ts";
+import { ISSUE_BODY_ANCHOR } from "../helpers/patterns.ts";
 
 export const issueBodyFromVaultFile = {
   name: "issue-body-from-vault-file",

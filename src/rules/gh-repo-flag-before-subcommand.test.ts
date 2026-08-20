@@ -10,11 +10,11 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { REPO_FLAG_ANCHOR } from "../helpers/patterns.ts";
 import {
   foreignRepoReason,
   ghRepoFlagBeforeSubcommand,
 } from "./gh-repo-flag-before-subcommand.ts";
-import { REPO_FLAG_ANCHOR } from "./patterns.ts";
 
 function blocked(pattern: string | RegExp, normalized: string): boolean {
   const re = pattern instanceof RegExp ? pattern : new RegExp(pattern);

@@ -140,13 +140,6 @@ export {
   resolveAgainstCwd,
   unquote,
 } from "./helpers/pattern-args.ts";
-export {
-  BODY_STRIP,
-  missingVaultBodyFile,
-} from "./predicates/missing-vault-body-file.ts";
-export { ghRepoCreateNeedsSeed } from "./rules/gh-repo-create-needs-seed.ts";
-export { ghRepoFlagBeforeSubcommand } from "./rules/gh-repo-flag-before-subcommand.ts";
-export { issueBodyFromVaultFile } from "./rules/issue-body-from-vault-file.ts";
 // Named re-exports for consumers that want to pick pieces: the
 // shipped rules (or the `rules` roster itself), the pattern constants
 // (pinned by the unit tests), the predicate handler, and the arg
@@ -167,7 +160,14 @@ export {
   REPO_FLAG_ANCHOR,
   SUBJECT_WITH_REF,
   TITLE_WITH_REF,
-} from "./rules/patterns.ts";
+} from "./helpers/patterns.ts";
+export {
+  BODY_STRIP,
+  missingVaultBodyFile,
+} from "./predicates/missing-vault-body-file.ts";
+export { ghRepoCreateNeedsSeed } from "./rules/gh-repo-create-needs-seed.ts";
+export { ghRepoFlagBeforeSubcommand } from "./rules/gh-repo-flag-before-subcommand.ts";
+export { issueBodyFromVaultFile } from "./rules/issue-body-from-vault-file.ts";
 export { prBodyFromVaultFile } from "./rules/pr-body-from-vault-file.ts";
 export { prCreateNeedsIssueLink } from "./rules/pr-create-needs-issue-link.ts";
 export { prMergeNeedsClosingKeywords } from "./rules/pr-merge-needs-closing-keywords.ts";

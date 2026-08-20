@@ -37,14 +37,13 @@ src/
 │   ├── pattern-args.test.ts
 │   ├── body-keyword.ts             # bodyHasClosingKeyword
 │   ├── body-keyword.test.ts
+│   ├── patterns.ts                 # the rule pattern constants (shared by the rules)
+│   ├── patterns.test.ts            # pattern-contract + command-anchor pins
 │   └── repo-name.ts                # repoName
 ├── predicates/
 │   ├── missing-vault-body-file.ts  # the predicate handler
 │   └── missing-vault-body-file.test.ts
 └── rules/
-    ├── patterns.ts                 # pattern constants (leaf)
-    ├── patterns.test.ts
-    ├── command-anchors.test.ts
     ├── gh-repo-flag-before-subcommand.ts + .test.ts
     ├── pr-body-from-vault-file.ts
     ├── pr-create-needs-issue-link.ts

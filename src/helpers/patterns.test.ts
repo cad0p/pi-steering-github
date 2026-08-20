@@ -2,27 +2,68 @@
 // Part of pi-steering-github.
 
 /**
- * Command-anchor pins for the non-foreign rules (normalized form):
- * which commands route to each rule at all. The rules' `pattern`
- * fields ARE the exported constants, so these tests pin the exact
- * behavior the rules ship.
+ * Unit tests for the github plugin's pattern constants (pattern
+ * contract). Import the constants from `./patterns.ts` directly: the
+ * module loads cleanly under plain node (`node --test
+ * --experimental-strip-types`) — the `@cad0p/pi-napkin/steering`
+ * subpath ships compiled JS (`dist/steering`) since 0.7.0-20260814.0,
+ * so there is no raw `.ts` under node_modules to trip the type
+ * stripper.
+ *
+ * The rule `pattern` fields ARE the exported constants (shared
+ * reference), so these tests pin the exact behavior the rules ship:
+ * a change to a constant is a change to the rule. Full-pipeline tests
+ * (real defineConfig + loadHarness + vault fixtures) live in
+ * `../integration.test.ts`.
  */
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { ghRepoCreateNeedsSeed } from "../rules/gh-repo-create-needs-seed.ts";
+import { issueBodyFromVaultFile } from "../rules/issue-body-from-vault-file.ts";
+import { prBodyFromVaultFile } from "../rules/pr-body-from-vault-file.ts";
+import { prCreateNeedsIssueLink } from "../rules/pr-create-needs-issue-link.ts";
+import { prMergeNeedsClosingKeywords } from "../rules/pr-merge-needs-closing-keywords.ts";
 import {
+  BODY_WITH_REF,
+  CLOSING_KEYWORD,
   ISSUE_BODY_ANCHOR,
+  ISSUE_REF,
   PR_BODY_ANCHOR,
   PR_CREATE_ANCHOR,
   PR_MERGE_ANCHOR,
   REPO_CREATE_PATTERN,
   REPO_FLAG_ANCHOR,
+  SUBJECT_WITH_REF,
+  TITLE_WITH_REF,
 } from "./patterns.ts";
 
 function blocked(pattern: string | RegExp, normalized: string): boolean {
   const re = pattern instanceof RegExp ? pattern : new RegExp(pattern);
   return re.test(normalized);
 }
+
+describe("github plugin — pattern constants", () => {
+  it("closing-keyword family and issue-ref are exported for pinning", () => {
+    assert.match(CLOSING_KEYWORD, /close/);
+    assert.match(ISSUE_REF, /#\\d/);
+    assert.match(TITLE_WITH_REF, /--title/);
+    assert.match(SUBJECT_WITH_REF, /--subject/);
+    assert.match(BODY_WITH_REF, /--body/);
+  });
+
+  it("rule pattern fields are the shared anchors (shared reference)", () => {
+    // House pinning style (mirrors the git plugin): the rules
+    // reference the exported constants, so a change to a constant is
+    // a change to the rule — no drift between test surface and
+    // shipped behavior.
+    assert.equal(prBodyFromVaultFile.pattern, PR_BODY_ANCHOR);
+    assert.equal(prCreateNeedsIssueLink.pattern, PR_CREATE_ANCHOR);
+    assert.equal(prMergeNeedsClosingKeywords.pattern, PR_MERGE_ANCHOR);
+    assert.equal(issueBodyFromVaultFile.pattern, ISSUE_BODY_ANCHOR);
+    assert.equal(ghRepoCreateNeedsSeed.pattern, REPO_CREATE_PATTERN);
+  });
+});
 
 describe("github plugin — gh-repo-flag-before-subcommand (normalized form)", () => {
   it("does not route read-only forms, excluded subcommands, or -R after the subcommand", () => {

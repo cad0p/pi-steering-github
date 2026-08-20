@@ -37,8 +37,8 @@
 
 import type { PredicateContext, Rule } from "@cad0p/pi-steering";
 import { getFlagValue, hasFlag } from "@cad0p/pi-steering-flags";
+import { REPO_FLAG_ANCHOR } from "../helpers/patterns.ts";
 import { repoName } from "../helpers/repo-name.ts";
-import { REPO_FLAG_ANCHOR } from "./patterns.ts";
 
 export const ghRepoFlagBeforeSubcommand = {
   name: "gh-repo-flag-before-subcommand",

@@ -23,7 +23,7 @@
  */
 
 import type { Rule } from "@cad0p/pi-steering";
-import { REPO_CREATE_PATTERN } from "./patterns.ts";
+import { REPO_CREATE_PATTERN } from "../helpers/patterns.ts";
 
 export const ghRepoCreateNeedsSeed = {
   name: "gh-repo-create-needs-seed",
