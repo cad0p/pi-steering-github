@@ -20,6 +20,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { INFO_ONLY } from "@cad0p/pi-steering-flags";
+import { BODY_STRIP } from "./predicates/missing-vault-body-file.ts";
 import {
   BODY_WITH_REF,
   CLOSING_KEYWORD,
@@ -98,7 +99,6 @@ describe("github plugin — command anchors (normalized form)", () => {
 
   it("pr-merge-needs-closing-keywords anchors pr merge only", () => {
     assert.equal(blocked(PR_MERGE_ANCHOR, "gh pr merge --squash"), true);
-    assert.equal(blocked(PR_MERGE_ANCHOR, "gh pr merge"), true);
     assert.equal(blocked(PR_MERGE_ANCHOR, "gh pr create --title x"), false);
     assert.equal(blocked(PR_MERGE_ANCHOR, "gh pr view 46"), false);
   });
@@ -136,7 +136,8 @@ describe("github plugin — pr-merge-needs-closing-keywords (normalized form)", 
     assert.equal(blocked(PR_MERGE_ANCHOR, "gh pr merge --squash"), true);
     assert.equal(blocked(PR_MERGE_ANCHOR, "gh pr merge"), true);
     assert.equal(blocked(PR_MERGE_ANCHOR, "gh pr merge 123 -s -t x"), true);
-    assert.equal(blocked(PR_MERGE_ANCHOR, "gh pr merge --help"), true); // anchor only — unless/condition decide
+    // The anchor itself does NOT decide help — unless/condition do.
+    assert.equal(blocked(PR_MERGE_ANCHOR, "gh pr merge --help"), true);
     assert.equal(blocked(PR_MERGE_ANCHOR, "gh pr create --title x"), false);
     assert.equal(blocked(PR_MERGE_ANCHOR, "gh pr view 46"), false);
   });
@@ -151,6 +152,198 @@ describe("github plugin — pr-merge-needs-closing-keywords (normalized form)", 
       typeof prMergeNeedsClosingKeywords.when?.condition,
       "function",
       "subject keyword check must live in when.condition",
+    );
+  });
+});
+
+describe("github plugin — gh-repo-create-needs-seed (normalized form)", () => {
+  // Any seed flag exempts: long or short form, ` ` or `=` value
+  // form, before or after the name. The `--add-readme --source .
+  // --push` combo is ALLOWED (seed present) — gh's own flag
+  // validation governs the combo at runtime; form check only,
+  // consistent with the body-file rules' philosophy.
+  it("allows any seed flag (--add-readme / --gitignore|-g / --license|-l / --template|-p)", () => {
+    assert.equal(
+      blocked(REPO_CREATE_PATTERN, "gh repo create x --add-readme"),
+      false,
+    );
+    assert.equal(
+      blocked(REPO_CREATE_PATTERN, "gh repo create --add-readme x"),
+      false,
+    );
+    assert.equal(
+      blocked(REPO_CREATE_PATTERN, "gh repo create x --gitignore Node"),
+      false,
+    );
+    assert.equal(
+      blocked(REPO_CREATE_PATTERN, "gh repo create x -g Node"),
+      false,
+    );
+    assert.equal(
+      blocked(REPO_CREATE_PATTERN, "gh repo create x --gitignore=Node"),
+      false,
+    );
+    assert.equal(
+      blocked(REPO_CREATE_PATTERN, "gh repo create x --license mit"),
+      false,
+    );
+    assert.equal(
+      blocked(REPO_CREATE_PATTERN, "gh repo create x -l mit"),
+      false,
+    );
+    assert.equal(
+      blocked(REPO_CREATE_PATTERN, "gh repo create x --license=mit"),
+      false,
+    );
+    assert.equal(
+      blocked(REPO_CREATE_PATTERN, "gh repo create x --template owner/repo"),
+      false,
+    );
+    assert.equal(
+      blocked(REPO_CREATE_PATTERN, "gh repo create x -p owner/repo"),
+      false,
+    );
+    assert.equal(
+      blocked(REPO_CREATE_PATTERN, "gh repo create x --template=owner/repo"),
+      false,
+    );
+    assert.equal(
+      blocked(
+        REPO_CREATE_PATTERN,
+        "gh repo create x --add-readme --source . --push",
+      ),
+      false,
+    );
+  });
+
+  it("blocks bare creates and non-seed flag combos", () => {
+    assert.equal(blocked(REPO_CREATE_PATTERN, "gh repo create x"), true);
+    assert.equal(
+      blocked(REPO_CREATE_PATTERN, "gh repo create x --source . --push"),
+      true,
+    );
+    assert.equal(
+      blocked(REPO_CREATE_PATTERN, "gh repo create x --source=. --push"),
+      true,
+    );
+    assert.equal(
+      blocked(REPO_CREATE_PATTERN, "gh repo create x -s . -r upstream"),
+      true,
+    );
+    assert.equal(
+      blocked(REPO_CREATE_PATTERN, "gh repo create x --public --clone"),
+      true,
+    );
+    assert.equal(
+      blocked(REPO_CREATE_PATTERN, "gh repo create x --clone"),
+      true,
+    );
+    assert.equal(
+      blocked(REPO_CREATE_PATTERN, "gh repo create x -t myteam --public"),
+      true,
+    );
+  });
+
+  // Token guard: `-local`/`-public`/`foo--add-readme` never match as
+  // seeds — the seed flag must be its own token. (Space-separated
+  // seed lookalikes INSIDE a quoted value falsely exempt — known
+  // limitation, documented in the README and the rule doc comment.)
+  it("token guard kills glued lookalikes (-local, -public, foo--add-readme)", () => {
+    assert.equal(blocked(REPO_CREATE_PATTERN, "gh repo create x -local"), true);
+    assert.equal(
+      blocked(REPO_CREATE_PATTERN, "gh repo create x -public"),
+      true,
+    );
+    assert.equal(
+      blocked(
+        REPO_CREATE_PATTERN,
+        "gh repo create x --description foo--add-readme",
+      ),
+      true,
+    );
+  });
+
+  // Accepted limitation (README "Known limitations"): the guard kills
+  // only GLUED lookalikes — a space-separated seed token inside a
+  // quoted flag value (quotes stripped in the normalized form) still
+  // counts as a seed and falsely exempts. Deliberate, pinned so the
+  // behavior can't change silently; same value-region class as the
+  // PR_* patterns.
+  it("accepted false exemption: seed token inside a quoted flag value", () => {
+    assert.equal(
+      blocked(
+        REPO_CREATE_PATTERN,
+        "gh repo create x --description see --license mit",
+      ),
+      false,
+    );
+  });
+});
+
+describe("github plugin — reason strings (byte-identity pins)", () => {
+  // The keyword-rule reason strings are byte-identical to the live
+  // global-config prototype (verified at ship time 2026-08-14 by an
+  // independent reviewer comparing both modules field-by-field); the
+  // two body-file rules were reworded in the pinned-perl work (issue
+  // #3) to teach the pinned perl body-strip substitution. Agents in
+  // the wild receive these verbatim in block reasons, and the global
+  // config's integration tests match rule NAMES only — so these
+  // literals are the only CI pin keeping the full reason text from
+  // drifting. A future reword MUST update this test in the same
+  // commit (and ideally the goldmine changelog note).
+  it("pr-body-from-vault-file reason", () => {
+    assert.equal(
+      prBodyFromVaultFile.reason,
+      "PR bodies must come from a body file in the napkin vault:\n" +
+        '  gh pr create --title "..." --body-file ' +
+        `<(perl -0777 -pe '${BODY_STRIP}' ` +
+        "<vault>/**/<repo>/prs/YYYY-MM-DD-pr<N>-<slug>.md)\n",
+    );
+  });
+
+  it("pr-create-needs-issue-link reason", () => {
+    assert.equal(
+      prCreateNeedsIssueLink.reason,
+      "A PR must close at least one issue — put the closing keyword in BOTH the " +
+        "title and body:\n" +
+        '  e.g: title: "feat: x (closes #12)"; body: contains "Closes #12"\n' +
+        "- Title keyword: makes the issue(s) auto-close.\n" +
+        "- Body keyword: only links the issue(s) to the PR on a Title-Only squash merge.\n" +
+        '- Multiple issues: repeat the keyword per issue — "Closes #A, closes #B" — ' +
+        '"Closes #A #B" honors only the first number.',
+    );
+  });
+
+  it("pr-merge-needs-closing-keywords reason", () => {
+    assert.equal(
+      prMergeNeedsClosingKeywords.reason,
+      "Merging requires a closing keyword in the squash commit subject " +
+        "— every PR must close at least one issue:\n" +
+        '  gh pr merge --squash --subject "feat: x (closes #12)"\n' +
+        '- Repeat the keyword per issue — "Closes #A #B" honors only the first number.\n',
+    );
+  });
+
+  it("issue-body-from-vault-file reason", () => {
+    assert.equal(
+      issueBodyFromVaultFile.reason,
+      "Issue bodies must come from a body file in the napkin vault:\n" +
+        '  gh issue create --title "..." --body-file ' +
+        `<(perl -0777 -pe '${BODY_STRIP}' ` +
+        "<vault>/**/<repo>/issues/YYYY-MM-DD-issue<N>-<slug>.md)\n" +
+        "- If foreign issue: cd to the repo you want to file the issue; " +
+        "REQUIREMENT: have a foreign subagent maintainer loop before filing",
+    );
+  });
+
+  it("gh-repo-create-needs-seed reason", () => {
+    assert.equal(
+      ghRepoCreateNeedsSeed.reason,
+      "gh repo create must seed the repo — a bare create births an EMPTY repo (no branches, no commits), " +
+        "forcing UNREVIEWED first content. Use seed flags and seek explicit user approval for PR merge.\n" +
+        "  gh repo create cad0p/<name> --add-readme\n" +
+        "- Seed flags: --add-readme (recommended), --license <x>, --gitignore <x>, --template <repo>.\n" +
+        "- The seed commit is the PR's base — the PR diff replaces the README.",
     );
   });
 });
