@@ -32,7 +32,7 @@ import {
   issueBodyFromVaultFile,
   PR_BODY_ANCHOR,
   PR_CREATE_ANCHOR,
-  PR_MERGE_PATTERN,
+  PR_MERGE_ANCHOR,
   parseRepoFlagTarget,
   prBodyFromVaultFile,
   prCreateNeedsIssueLink,
@@ -67,7 +67,7 @@ describe("github plugin — pattern constants", () => {
     assert.equal(ghRepoFlagBeforeSubcommand.pattern, REPO_FLAG_ANCHOR);
     assert.equal(prBodyFromVaultFile.pattern, PR_BODY_ANCHOR);
     assert.equal(prCreateNeedsIssueLink.pattern, PR_CREATE_ANCHOR);
-    assert.equal(prMergeNeedsClosingKeywords.pattern, PR_MERGE_PATTERN);
+    assert.equal(prMergeNeedsClosingKeywords.pattern, PR_MERGE_ANCHOR);
     assert.equal(issueBodyFromVaultFile.pattern, ISSUE_BODY_ANCHOR);
     assert.equal(ghRepoCreateNeedsSeed.pattern, REPO_CREATE_PATTERN);
   });
@@ -244,9 +244,9 @@ describe("github plugin — command anchors (normalized form)", () => {
   });
 
   it("pr-merge-needs-closing-keywords anchors pr merge only", () => {
-    assert.equal(blocked(PR_MERGE_PATTERN, "gh pr merge --squash"), true);
-    assert.equal(blocked(PR_MERGE_PATTERN, "gh pr create --title x"), false);
-    assert.equal(blocked(PR_MERGE_PATTERN, "gh pr view 46"), false);
+    assert.equal(blocked(PR_MERGE_ANCHOR, "gh pr merge --squash"), true);
+    assert.equal(blocked(PR_MERGE_ANCHOR, "gh pr create --title x"), false);
+    assert.equal(blocked(PR_MERGE_ANCHOR, "gh pr view 46"), false);
   });
 
   it("issue-body-from-vault-file anchors issue create/edit only", () => {
@@ -267,104 +267,42 @@ describe("github plugin — command anchors (normalized form)", () => {
   });
 
   it("does not fire on non-gh basenames (echo …)", () => {
-    assert.equal(blocked(PR_MERGE_PATTERN, "echo gh pr merge --squash"), false);
+    assert.equal(blocked(PR_MERGE_ANCHOR, "echo gh pr merge --squash"), false);
     assert.equal(blocked(PR_BODY_ANCHOR, "echo gh pr create --title x"), false);
   });
 });
 
 describe("github plugin — pr-merge-needs-closing-keywords (normalized form)", () => {
-  // Normalized form of:
-  //   gh pr merge --squash --subject "feat: x (closes #12)" --body "Closes #12"
-  it("allows keyword in BOTH --subject and --body", () => {
-    assert.equal(
-      blocked(
-        PR_MERGE_PATTERN,
-        "gh pr merge --squash --subject fix: x (closes #12) --body Closes #12",
-      ),
-      false,
-    );
+  // The rule now anchors PR_MERGE_ANCHOR only; the help carve-out
+  // and the subject check live in `when.condition` on the
+  // walker-parsed argv (token-level, quote-aware) — exercised
+  // end-to-end in `../integration.test.ts`. This describe pins the
+  // ANCHOR surface (which commands route to the rule at all).
+  it("anchors pr merge only (all forms route to the rule)", () => {
+    assert.equal(blocked(PR_MERGE_ANCHOR, "gh pr merge --squash"), true);
+    assert.equal(blocked(PR_MERGE_ANCHOR, "gh pr merge"), true);
+    assert.equal(blocked(PR_MERGE_ANCHOR, "gh pr merge 123 -s -t x"), true);
+    // The anchor itself does NOT decide help — the condition does.
+    assert.equal(blocked(PR_MERGE_ANCHOR, "gh pr merge --help"), true);
+    assert.equal(blocked(PR_MERGE_ANCHOR, "gh pr create --title x"), false);
+    assert.equal(blocked(PR_MERGE_ANCHOR, "gh pr view 46"), false);
   });
 
-  // Normalized form of: gh pr merge 123 -s -t "fix: y (closes #7)" -b "Closes #7"
-  it("allows -t/-b short flags with a PR number argument", () => {
+  it("the rule gates via when.condition only (no string-level unless)", () => {
+    const rule = prMergeNeedsClosingKeywords as unknown as {
+      unless?: unknown;
+      when?: { condition?: unknown };
+    };
     assert.equal(
-      blocked(
-        PR_MERGE_PATTERN,
-        "gh pr merge 123 -s -t fix: y (closes #7) -b Closes #7",
-      ),
-      false,
+      rule.unless,
+      undefined,
+      "no unless — the help carve-out must be token-level, not string-level",
     );
-  });
-
-  // Normalized form of:
-  //   gh pr merge --auto --squash --subject="feat (RESOLVES: #4)" --body="Resolves: #4"
-  it("allows --flag=value glued forms, colons and case variants", () => {
     assert.equal(
-      blocked(
-        PR_MERGE_PATTERN,
-        'gh pr merge --auto --squash --subject="feat (RESOLVES: #4)" --body="Resolves: #4"',
-      ),
-      false,
+      typeof rule.when?.condition,
+      "function",
+      "help carve-out + subject keyword check must live in when.condition",
     );
-  });
-
-  // Normalized form of: gh pr merge --squash --subject "fix: x (closes #12)" --body "Closes #12, closes #15"
-  it("allows multiple issues with keyword per issue", () => {
-    assert.equal(
-      blocked(
-        PR_MERGE_PATTERN,
-        "gh pr merge --squash --subject fix: x (closes #12) --body Closes #12, closes #15",
-      ),
-      false,
-    );
-  });
-
-  // Normalized form of: gh pr merge --squash --body "Closes #12"
-  it("blocks without --subject (commit-subject channel required)", () => {
-    assert.equal(
-      blocked(PR_MERGE_PATTERN, "gh pr merge --squash --body Closes #12"),
-      true,
-    );
-  });
-
-  // Normalized form of: gh pr merge --squash --subject "fix: x (closes #12)"
-  it("allows --subject only (commit-body channel optional — the subject closes)", () => {
-    assert.equal(
-      blocked(
-        PR_MERGE_PATTERN,
-        "gh pr merge --squash --subject fix: x (closes #12)",
-      ),
-      false,
-    );
-  });
-
-  // Normalized form of:
-  //   gh pr merge --squash --subject "fix: x (closes #12)" --body-file message.md
-  it("allows --body-file when --subject carries the keyword", () => {
-    assert.equal(
-      blocked(
-        PR_MERGE_PATTERN,
-        "gh pr merge --squash --subject fix: x (closes #12) --body-file message.md",
-      ),
-      false,
-    );
-  });
-
-  // Normalized form of:
-  //   gh pr merge --squash --subject "fix: x (see #12)" --body "see #12"
-  it("blocks bare issue mentions without the keyword (mention != close)", () => {
-    assert.equal(
-      blocked(
-        PR_MERGE_PATTERN,
-        'gh pr merge --squash --subject "fix: x (see #12)" --body "see #12"',
-      ),
-      true,
-    );
-  });
-
-  // Normalized form of: gh pr merge --squash
-  it("blocks without any closing keyword", () => {
-    assert.equal(blocked(PR_MERGE_PATTERN, "gh pr merge --squash"), true);
   });
 });
 

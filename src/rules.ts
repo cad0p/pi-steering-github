@@ -90,11 +90,13 @@
  */
 
 import type { PredicateContext, Rule } from "@cad0p/pi-steering";
+import { hasFlag } from "@cad0p/pi-steering-flags";
 import { BODY_STRIP } from "./body-strip.ts";
 import {
   bodyHasClosingKeyword,
   findFlagValue,
   repoName,
+  unquote,
 } from "./predicates/missing-vault-body-file.ts";
 
 // ---------------------------------------------------------------------------
@@ -155,17 +157,18 @@ export const PR_BODY_ANCHOR = /^gh\s+pr\s+(?:create|new|edit)\b/i;
 export const PR_CREATE_ANCHOR = /^gh\s+pr\s+(?:create|new)\b/i;
 
 /**
- * `pr-merge-needs-closing-keywords` pattern: fires unless the command
- * carries a closing-keyword ref in the `--subject` value (short
- * `-t` form, `--flag=value` forms). The commit subject is part of
- * the squash commit message — GitHub scans the whole message for
- * closing keywords, so the subject channel alone closes the issues
- * (the commit body is optional at merge).
+ * `pr-merge-needs-closing-keywords` anchor: pr merge only. Fires
+ * unless the command carries a closing-keyword ref in the `--subject`
+ * value (short `-t` form, `--flag=value` forms) — the help carve-out
+ * and the subject check both live in `when.condition` against the
+ * walker-parsed argv (token-level, quote-aware: a `--help` token
+ * INSIDE a quoted value never exempts, and gh's last-flag-wins
+ * precedence is honored). The commit subject is part of the squash
+ * commit message — GitHub scans the whole message for closing
+ * keywords, so the subject channel alone closes the issues (the
+ * commit body is optional at merge).
  */
-export const PR_MERGE_PATTERN = new RegExp(
-  `^gh\\s+pr\\s+merge\\b(?!` + `[\\s\\S]*${SUBJECT_WITH_REF}` + `)`,
-  "i",
-);
+export const PR_MERGE_ANCHOR = /^gh\s+pr\s+merge\b/i;
 
 /** `issue-body-from-vault-file` anchor: issue create/edit. */
 export const ISSUE_BODY_ANCHOR = /^gh\s+issue\s+(?:create|edit)\b/i;
@@ -426,7 +429,37 @@ export const prMergeNeedsClosingKeywords = {
   name: "pr-merge-needs-closing-keywords",
   tool: "bash",
   field: "command",
-  pattern: PR_MERGE_PATTERN,
+  pattern: PR_MERGE_ANCHOR,
+  when: {
+    condition: async (ctx) => {
+      const args = ctx.input.args ?? [];
+      // Help is read-only introspection — never a merge. Token-level
+      // (exact flag tokens on the walker argv, quote-aware): a `--help`
+      // inside a QUOTED VALUE (`--subject "see --help"`) does NOT
+      // exempt — that value is still a real merge subject.
+      const help = hasFlag(args, "--help") || hasFlag(args, "-h");
+      if (help) return false;
+      // gh/cobra semantics: the LAST flag occurrence wins. Scan from
+      // the end so `-t 'see #13' --subject 'closes #12'` uses the
+      // `--subject` value (a bare `-t` earlier in the line is
+      // overridden, not blocking).
+      let subject: string | null = null;
+      for (let i = args.length - 1; i >= 0; i--) {
+        const t = args[i]?.text ?? "";
+        if (t === "--subject" || t === "-t") {
+          subject = unquote(args[i + 1]?.text ?? "");
+          break;
+        }
+        if (t.startsWith("--subject=")) {
+          subject = unquote(t.slice("--subject=".length));
+          break;
+        }
+      }
+      const subjectOk =
+        subject !== null && new RegExp(ISSUE_REF, "i").test(subject);
+      return !subjectOk;
+    },
+  },
   reason:
     `Merging requires a closing keyword in the squash commit subject ` +
     `— every PR must close at least one issue:\n` +
