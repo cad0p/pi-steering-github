@@ -193,6 +193,7 @@ export const REPO_CREATE_ANCHOR = /^gh\s+repo\s+(?:create|new)\b/i;
  */
 export const REPO_FLAG_ANCHOR =
   /^gh\s+(?:-R\s+\S*\/\S+|--repo\s+\S*\/\S+|--repo=\S*\/\S+|-R\S*\/\S+)\s+(?:pr\s+(?:create|new|edit|merge)|issue\s+(?:create|edit))\b/i;
+
 /**
  * A seed flag as its own token: long or short form, ` ` or `=`
  * value forms. Token-boundary guarded — glued lookalikes

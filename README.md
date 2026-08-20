@@ -168,7 +168,7 @@ The pattern constants (`CLOSING_KEYWORD`, `ISSUE_REF`, `TITLE_WITH_REF`, `SUBJEC
 - **`-R` after the subcommand is not gated by `gh-repo-flag-before-subcommand`**: `gh pr create -R x/y …` still matches the pr anchors (no bypass), but the foreign target isn't redirected (the `-R` flag lands after the subcommand the anchors match). Different, smaller class — follow-up.
 - **Slashless `-R <remote>`** (remote-name form, no `/`) doesn't match the new rule's anchor — the fork→upstream flow passes through unchanged (allowed).
 - **`-R x/y repo create` stays ungated** by the redirect (the repo doesn't exist yet — nothing to cd into; `repo create` never needs `-R` since the target is the positional argument, and the seed rule gates the actual create form).
-- **`-Rcad0p/x` glued short form** (no space) is fail-closed-blocked even for the own-repo fork case — `hasFlag`/`getFlagValue` from `@cad0p/pi-steering-flags` can't see the value (walker keeps the glued word intact); the target is unparsable → block. Upstream gap: cad0p/pi-steering-flags#11.
+- **`-Rcad0p/x` glued short form** (no space) is fail-closed-blocked even for the own-repo case — `hasFlag`/`getFlagValue` from `@cad0p/pi-steering-flags` can't see the value (walker keeps the glued word intact); the target is unparsable → block. Upstream gap: cad0p/pi-steering-flags#11.
 
 ## License
 

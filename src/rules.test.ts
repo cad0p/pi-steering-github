@@ -181,9 +181,9 @@ describe("github plugin — gh-repo-flag-before-subcommand (normalized form)", (
       blocked(REPO_FLAG_ANCHOR, "gh -R cad0p/x pr merge --squash -hx"),
       true,
     );
-    // --help=value is not a help flag token — routes; unless fails
-    // to carve out (hasFlag matches --help= via its attached-value
-    // prefix, so it DOES exempt — harmless invalid invocation; the
+    // --help=value is not a help flag token — routes to the rule;
+    // the unless exempts it (hasFlag matches --help= via its
+    // attached-value prefix — harmless invalid invocation; the
     // behavior delta vs the old regex is pinned in the unless tests).
     assert.equal(
       blocked(REPO_FLAG_ANCHOR, "gh -R cad0p/x pr merge --squash --help="),
