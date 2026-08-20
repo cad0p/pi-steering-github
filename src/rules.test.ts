@@ -128,6 +128,17 @@ describe("github plugin — command anchors (normalized form)", () => {
       blocked(PR_MERGE_PATTERN, "gh pr merge --squash --help="),
       true,
     );
+    // Help with a positional PR number arg (gh's arg forms: number|url|branch).
+    assert.equal(blocked(PR_MERGE_PATTERN, "gh pr merge 123 --help"), false);
+    assert.equal(blocked(PR_MERGE_PATTERN, "gh pr merge 123 -h"), false);
+    // Help after a --subject value.
+    assert.equal(
+      blocked(
+        PR_MERGE_PATTERN,
+        "gh pr merge --squash --subject fix: x (closes #12) -h",
+      ),
+      false,
+    );
     // Help + a valid closing subject: exempt either way.
     assert.equal(
       blocked(
