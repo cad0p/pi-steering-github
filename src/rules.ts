@@ -258,7 +258,9 @@ export const prMergeNeedsClosingKeywords = {
   when: {
     condition: async (ctx) => {
       const subject = findFlagValue(ctx, ["--subject", "-t"]);
-      return subject === null || !new RegExp(ISSUE_REF, "i").test(subject);
+      const subjectOk =
+        subject !== null && new RegExp(ISSUE_REF, "i").test(subject);
+      return !subjectOk;
     },
   },
   reason:
