@@ -77,6 +77,7 @@
  */
 
 import type { Rule } from "@cad0p/pi-steering";
+import { INFO_ONLY } from "@cad0p/pi-steering-flags";
 import { BODY_STRIP } from "./body-strip.ts";
 import {
   bodyHasClosingKeyword,
@@ -141,17 +142,17 @@ export const PR_BODY_ANCHOR = /^gh\s+pr\s+(?:create|new|edit)\b/i;
 export const PR_CREATE_ANCHOR = /^gh\s+pr\s+(?:create|new)\b/i;
 
 /**
- * `pr-merge-needs-closing-keywords` pattern: fires unless the command
- * carries a closing-keyword ref in the `--subject` value (short
- * `-t` form, `--flag=value` forms). The commit subject is part of
- * the squash commit message — GitHub scans the whole message for
- * closing keywords, so the subject channel alone closes the issues
- * (the commit body is optional at merge).
+ * `pr-merge-needs-closing-keywords` anchor: pr merge only. Fires
+ * unless the command carries a closing-keyword ref in the `--subject`
+ * value (short `-t` form, `--flag=value` forms) — the subject check
+ * lives in `when.condition` against the walker-parsed argv, and the
+ * `--help`/`-h` read-only carve-out lives in `unless: INFO_ONLY`
+ * (`@cad0p/pi-steering-flags`). The commit subject is part of the
+ * squash commit message — GitHub scans the whole message for closing
+ * keywords, so the subject channel alone closes the issues (the
+ * commit body is optional at merge).
  */
-export const PR_MERGE_PATTERN = new RegExp(
-  `^gh\\s+pr\\s+merge\\b(?!` + `[\\s\\S]*${SUBJECT_WITH_REF}` + `)`,
-  "i",
-);
+export const PR_MERGE_ANCHOR = /^gh\s+pr\s+merge\b/i;
 
 /** `issue-body-from-vault-file` anchor: issue create/edit. */
 export const ISSUE_BODY_ANCHOR = /^gh\s+issue\s+(?:create|edit)\b/i;
@@ -252,7 +253,14 @@ export const prMergeNeedsClosingKeywords = {
   name: "pr-merge-needs-closing-keywords",
   tool: "bash",
   field: "command",
-  pattern: PR_MERGE_PATTERN,
+  pattern: PR_MERGE_ANCHOR,
+  unless: INFO_ONLY,
+  when: {
+    condition: async (ctx) => {
+      const subject = findFlagValue(ctx, ["--subject", "-t"]);
+      return subject === null || !new RegExp(ISSUE_REF, "i").test(subject);
+    },
+  },
   reason:
     `Merging requires a closing keyword in the squash commit subject ` +
     `— every PR must close at least one issue:\n` +
