@@ -9,8 +9,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { PredicateContext } from "@cad0p/pi-steering";
-import { BODY_STRIP } from "./body-strip.ts";
 import { bodyHasClosingKeyword } from "./body-keyword.ts";
+import { BODY_STRIP } from "./body-strip.ts";
 
 // ---------------------------------------------------------------------------
 // Test scaffolding: hand-built ctx
