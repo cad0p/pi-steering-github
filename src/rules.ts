@@ -77,7 +77,7 @@
  */
 
 import type { PredicateContext, Rule } from "@cad0p/pi-steering";
-import { getFlagValue, hasFlag } from "@cad0p/pi-steering-flags";
+import { getFlagValue, hasFlag, isInfoOnly } from "@cad0p/pi-steering-flags";
 import { BODY_STRIP } from "./body-strip.ts";
 import {
   bodyHasClosingKeyword,
@@ -146,11 +146,14 @@ export const PR_CREATE_ANCHOR = /^gh\s+pr\s+(?:create|new)\b/i;
 /**
  * `pr-merge-needs-closing-keywords` anchor: pr merge only. Fires
  * unless the command carries a closing-keyword ref in the `--subject`
- * value (short `-t` form, `--flag=value` forms) — the help carve-out
- * and the subject check both live in `when.condition` against the
- * walker-parsed argv (token-level, quote-aware: a `--help` token
- * INSIDE a quoted value never exempts, and gh's last-flag-wins
- * precedence is honored). The commit subject is part of the squash
+ * value (short `-t` form, `--flag=value` forms) — the info-only
+ * carve-out and subject check both live in `when.condition` against
+ * the walker-parsed argv. `isInfoOnly` recognizes its safe default
+ * `--help`/`--version` tokens plus GitHub's additive `-h`; attached
+ * forms are included, while quoted values such as `--subject "see
+ * --help"` remain real merge subjects. An exact quoted info token is
+ * indistinguishable from a bare flag after quote removal and is an
+ * accepted limitation. The commit subject is part of the squash
  * commit message — GitHub scans the whole message for closing
  * keywords, so the subject channel alone closes the issues (the
  * commit body is optional at merge).
@@ -240,11 +243,9 @@ export const ghRepoFlagBeforeSubcommand = {
   unless: async (ctx: PredicateContext) => {
     const args = ctx.input.args ?? [];
     // Help is read-only introspection — never a foreign redirect.
-    // Token-level (exact flag tokens on the walker argv, quote-aware):
-    // a `--help` inside a QUOTED VALUE (`--subject "see --help"`) does
-    // NOT exempt — that value is still a real gated command. (Same
-    // shape as the merge rule's carve-out; NOT `INFO_ONLY`, whose
-    // string-layer `\b` has the quoted-value hole.)
+    // Keep this independent -R rule on hasFlag; its token-level
+    // check means a `--help` inside a QUOTED VALUE (`--subject
+    // "see --help"`) does NOT exempt a real gated command.
     if (hasFlag(args, "--help") || hasFlag(args, "-h")) return true;
     // The anchor routes ANY first flag token (pure router). Release
     // commands whose FIRST flag token is NOT the repo-flag family
@@ -417,12 +418,14 @@ export const prMergeNeedsClosingKeywords = {
   when: {
     condition: async (ctx) => {
       const args = ctx.input.args ?? [];
-      // Help is read-only introspection — never a merge. Token-level
-      // (exact flag tokens on the walker argv, quote-aware): a `--help`
-      // inside a QUOTED VALUE (`--subject "see --help"`) does NOT
-      // exempt — that value is still a real merge subject.
-      const help = hasFlag(args, "--help") || hasFlag(args, "-h");
-      if (help) return false;
+      // Help/version are read-only introspection — never a merge.
+      // isInfoOnly supplies the safe --help/--version defaults and
+      // GitHub's additive -h. Its token-level argv check keeps
+      // `--subject "see --help"` / `"see --version"` gated; attached
+      // forms such as `--help=value` are harmless and allowed. An
+      // exact quoted info token is indistinguishable from a bare flag
+      // after quote removal (an accepted helper limitation).
+      if (isInfoOnly(args, ["-h"])) return false;
       // gh/cobra semantics: the LAST flag occurrence wins. Scan from
       // the end so `-t 'see #13' --subject 'closes #12'` uses the
       // `--subject` value (a bare `-t` earlier in the line is

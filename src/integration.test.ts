@@ -517,10 +517,11 @@ describe("github plugin — PR rules (issue-link + vault body-file policy)", () 
 
   // ---- pr-merge-needs-closing-keywords ----
 
-  it("allows pr merge --help / -h (read-only introspection, issue #17 repro)", async () => {
+  it("allows the isInfoOnly default flags and GitHub's additive -h", async () => {
     for (const cmd of [
       `gh pr merge --help`,
       `gh pr merge -h`,
+      `gh pr merge --version`,
       `gh pr merge --squash --help`,
       `gh pr merge --help --squash`,
     ]) {
@@ -530,6 +531,26 @@ describe("github plugin — PR rules (issue-link + vault body-file policy)", () 
         false,
         `expected allow for: ${cmd} (got block by ${rule})`,
       );
+    }
+  });
+
+  it("allows attached info flags and keeps -v gated", async () => {
+    for (const cmd of [
+      `gh pr merge --help=value`,
+      `gh pr merge --version=1`,
+      `gh pr merge --squash -h=value`,
+    ]) {
+      const { block, rule } = await evaluateBash(makeFixtureDir(), cmd, host);
+      assert.equal(
+        block,
+        false,
+        `expected allow for: ${cmd} (got block by ${rule})`,
+      );
+    }
+    for (const cmd of [`gh pr merge -v`, `gh pr merge -v=value`]) {
+      const { block, rule } = await evaluateBash(makeFixtureDir(), cmd, host);
+      assert.equal(block, true, `expected block for: ${cmd}`);
+      assert.equal(rule, "pr-merge-needs-closing-keywords", `for: ${cmd}`);
     }
   });
 
@@ -633,18 +654,31 @@ describe("github plugin — PR rules (issue-link + vault body-file policy)", () 
     assert.equal(rule, "pr-merge-needs-closing-keywords");
   });
 
-  it("blocks a --help token INSIDE a quoted subject value (not a help invocation)", async () => {
-    // Review finding: `unless: INFO_ONLY` matched the normalized string
-    // (quotes stripped) and wrongly exempted `--subject "see --help"`.
-    // The help carve-out is token-level on the walker argv — a help
-    // token inside a VALUE is still a real merge subject and must block.
+  it("blocks help/version tokens INSIDE quoted subject values", async () => {
+    // The helper is token-level on walker argv: a help/version token
+    // inside a VALUE is still a real merge subject and must block.
     for (const cmd of [
       `gh pr merge --squash --subject "see --help"`,
       `gh pr merge --squash --subject="see --help"`,
+      `gh pr merge --squash --subject "see --version"`,
+      `gh pr merge --squash --subject="see --version"`,
     ]) {
       const { block, rule } = await evaluateBash(makeFixtureDir(), cmd, host);
       assert.equal(block, true, `expected block for: ${cmd}`);
       assert.equal(rule, "pr-merge-needs-closing-keywords", `for: ${cmd}`);
+    }
+  });
+
+  it("pins exact quoted info tokens as an accepted quote-removal limitation", async () => {
+    // After the walker removes quotes, an exact quoted value is
+    // indistinguishable from a bare info flag, so the helper allows it.
+    for (const cmd of [
+      `gh pr merge --squash --subject "--help"`,
+      `gh pr merge --squash --subject "--version"`,
+    ]) {
+      const { block, rule } = await evaluateBash(makeFixtureDir(), cmd, host);
+      assert.equal(block, false, `expected accepted limitation for: ${cmd}`);
+      assert.notEqual(rule, "pr-merge-needs-closing-keywords", `for: ${cmd}`);
     }
   });
 

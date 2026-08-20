@@ -30,8 +30,8 @@
  *                                      BOTH title and body.
  *   - `pr-merge-needs-closing-keywords` — closing keyword + `#N` in
  *                                      the `--subject` value (`--help`/
- *                                      `-h` read-only introspection
- *                                      never blocks).
+ *                                      `--version`/GitHub `-h` read-only
+ *                                      introspection never blocks).
  *   - `issue-body-from-vault-file`   — issue bodies come from vault
  *                                      body files under `<repo>/issues/`.
  *   - `gh-repo-create-needs-seed`    — `gh repo create|new` must
