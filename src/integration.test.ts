@@ -516,6 +516,57 @@ describe("github plugin — PR rules (issue-link + vault body-file policy)", () 
 
   // ---- pr-merge-needs-closing-keywords ----
 
+  it("allows pr merge --help / -h (read-only introspection, issue #17 repro)", async () => {
+    for (const cmd of [
+      `gh pr merge --help`,
+      `gh pr merge -h`,
+      `gh pr merge --squash --help`,
+      `gh pr merge --help --squash`,
+    ]) {
+      const { block, rule } = await evaluateBash(makeFixtureDir(), cmd, host);
+      assert.equal(
+        block,
+        false,
+        `expected allow for: ${cmd} (got block by ${rule})`,
+      );
+    }
+  });
+
+  it("allows pr merge --help with a positional PR number / after --subject value", async () => {
+    for (const cmd of [
+      `gh pr merge 123 --help`,
+      `gh pr merge 123 -h`,
+      `gh pr merge --squash --subject "feat: x (closes #12)" -h`,
+    ]) {
+      const { block, rule } = await evaluateBash(makeFixtureDir(), cmd, host);
+      assert.equal(
+        block,
+        false,
+        `expected allow for: ${cmd} (got block by ${rule})`,
+      );
+    }
+  });
+
+  it("blocks bare pr merge (no args — real merge of current-branch PR)", async () => {
+    const { block, rule } = await evaluateBash(
+      makeFixtureDir(),
+      `gh pr merge`,
+      host,
+    );
+    assert.equal(block, true, "expected block");
+    assert.equal(rule, "pr-merge-needs-closing-keywords");
+  });
+
+  it("blocks pr merge --squash (no --subject, no closing keyword)", async () => {
+    const { block, rule } = await evaluateBash(
+      makeFixtureDir(),
+      `gh pr merge --squash`,
+      host,
+    );
+    assert.equal(block, true, "expected block");
+    assert.equal(rule, "pr-merge-needs-closing-keywords");
+  });
+
   it("allows pr merge with keyword in BOTH --subject and --body", async () => {
     const { block, rule } = await evaluateBash(
       makeFixtureDir(),
@@ -544,6 +595,33 @@ describe("github plugin — PR rules (issue-link + vault body-file policy)", () 
     assert.equal(block, false, `expected allow, got block by ${rule}`);
   });
 
+  it("allows -t/-b short flags with a PR number argument", async () => {
+    const { block, rule } = await evaluateBash(
+      makeFixtureDir(),
+      `gh pr merge 123 -s -t "fix: y (closes #7)" -b "Closes #7"`,
+      host,
+    );
+    assert.equal(block, false, `expected allow, got block by ${rule}`);
+  });
+
+  it("allows --subject= glued forms, colons and case variants", async () => {
+    const { block, rule } = await evaluateBash(
+      makeFixtureDir(),
+      `gh pr merge --auto --squash --subject="feat: x (RESOLVES #4)"`,
+      host,
+    );
+    assert.equal(block, false, `expected allow, got block by ${rule}`);
+  });
+
+  it("allows multiple issues with keyword per issue in the merge subject", async () => {
+    const { block, rule } = await evaluateBash(
+      makeFixtureDir(),
+      `gh pr merge --squash --subject "fix: x (closes #12, closes #15)"`,
+      host,
+    );
+    assert.equal(block, false, `expected allow, got block by ${rule}`);
+  });
+
   it("blocks pr merge with a bare mention only", async () => {
     const { block, rule } = await evaluateBash(
       makeFixtureDir(),
@@ -552,6 +630,39 @@ describe("github plugin — PR rules (issue-link + vault body-file policy)", () 
     );
     assert.equal(block, true, "expected block");
     assert.equal(rule, "pr-merge-needs-closing-keywords");
+  });
+
+  it("blocks a --help token INSIDE a quoted subject value (not a help invocation)", async () => {
+    // Review finding: `unless: INFO_ONLY` matched the normalized string
+    // (quotes stripped) and wrongly exempted `--subject "see --help"`.
+    // The help carve-out is token-level on the walker argv — a help
+    // token inside a VALUE is still a real merge subject and must block.
+    for (const cmd of [
+      `gh pr merge --squash --subject "see --help"`,
+      `gh pr merge --squash --subject="see --help"`,
+    ]) {
+      const { block, rule } = await evaluateBash(makeFixtureDir(), cmd, host);
+      assert.equal(block, true, `expected block for: ${cmd}`);
+      assert.equal(rule, "pr-merge-needs-closing-keywords", `for: ${cmd}`);
+    }
+  });
+
+  it("honors gh's last-flag-wins precedence for repeated --subject/-t", async () => {
+    // Cobra semantics: the LAST flag occurrence wins. A valid later
+    // `--subject` overrides an earlier bare `-t`…
+    const { block, rule } = await evaluateBash(
+      makeFixtureDir(),
+      `gh pr merge --squash -t "see #13" --subject "closes #12"`,
+      host,
+    );
+    assert.equal(block, false, `expected allow, got block by ${rule}`);
+    // …and a bare `-t` as the LAST flag with no ref still blocks.
+    const { block: blockLast } = await evaluateBash(
+      makeFixtureDir(),
+      `gh pr merge --squash --subject "closes #12" -t "see #13"`,
+      host,
+    );
+    assert.equal(blockLast, true, "expected block");
   });
 
   it("does not gate other gh subcommands (view / branch / close)", async () => {

@@ -29,7 +29,9 @@
  *   - `pr-create-needs-issue-link`   — closing keyword + `#N` in
  *                                      BOTH title and body.
  *   - `pr-merge-needs-closing-keywords` — closing keyword + `#N` in
- *                                      BOTH `--subject` and `--body`.
+ *                                      the `--subject` value (`--help`/
+ *                                      `-h` read-only introspection
+ *                                      never blocks).
  *   - `issue-body-from-vault-file`   — issue bodies come from vault
  *                                      body files under `<repo>/issues/`.
  *   - `gh-repo-create-needs-seed`    — `gh repo create|new` must
@@ -115,7 +117,7 @@ export {
   issueBodyFromVaultFile,
   PR_BODY_ANCHOR,
   PR_CREATE_ANCHOR,
-  PR_MERGE_PATTERN,
+  PR_MERGE_ANCHOR,
   prBodyFromVaultFile,
   prCreateNeedsIssueLink,
   prMergeNeedsClosingKeywords,
