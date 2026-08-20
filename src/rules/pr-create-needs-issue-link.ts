@@ -14,10 +14,8 @@
  */
 
 import type { Rule } from "@cad0p/pi-steering";
-import {
-  bodyHasClosingKeyword,
-  findFlagValue,
-} from "../predicates/missing-vault-body-file.ts";
+import { bodyHasClosingKeyword } from "../helpers/body-keyword.ts";
+import { findFlagValue } from "../helpers/pattern-args.ts";
 import { ISSUE_REF, PR_CREATE_ANCHOR } from "./patterns.ts";
 
 export const prCreateNeedsIssueLink = {

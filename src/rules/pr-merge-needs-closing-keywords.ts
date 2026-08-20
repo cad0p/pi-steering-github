@@ -15,7 +15,7 @@
 
 import type { Rule } from "@cad0p/pi-steering";
 import { isInfoOnly } from "@cad0p/pi-steering-flags";
-import { unquote } from "../predicates/missing-vault-body-file.ts";
+import { unquote } from "../helpers/pattern-args.ts";
 import { ISSUE_REF, PR_MERGE_ANCHOR } from "./patterns.ts";
 
 export const prMergeNeedsClosingKeywords = {

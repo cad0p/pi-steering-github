@@ -1,19 +1,22 @@
 // SPDX-License-Identifier: MIT
 // Part of pi-steering-github.
 
-/**
- * Bundle re-export for the predicate handler and the arg helpers.
- * Interim form — points at the monolithic predicate module until
- * the helpers extraction lands.
- */
+export { bodyHasClosingKeyword } from "../helpers/body-keyword.ts";
 export {
   argText,
-  BODY_STRIP,
-  bodyHasClosingKeyword,
   findBodyFileValue,
   findFlagValue,
-  missingVaultBodyFile,
   parseBodyFileArg,
   resolveAgainstCwd,
   unquote,
-} from "./missing-vault-body-file.ts";
+} from "../helpers/pattern-args.ts";
+/**
+ * Bundle re-export for the predicate handler and the arg helpers.
+ * The handler lives in `./missing-vault-body-file.ts`; the helpers
+ * (`argText`, `unquote`, `findFlagValue`, `findBodyFileValue`,
+ * `parseBodyFileArg`, `resolveAgainstCwd`, `bodyHasClosingKeyword`,
+ * plus `BODY_STRIP`) live in `../helpers/` and are re-exported here
+ * so consumers and the plugin index can keep a single predicates
+ * path.
+ */
+export { BODY_STRIP, missingVaultBodyFile } from "./missing-vault-body-file.ts";
