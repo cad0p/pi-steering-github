@@ -60,7 +60,8 @@ then cd into the foreign repo and target it from there.
 
 - **Fork→upstream flow is allowed**: when the `-R` target's basename equals the cwd repo's basename (origin URL basename, cwd-folder fallback — the existing `repoName` helper), the command passes — `gh -R upstream/foo pr create` from inside the `me/foo` clone is the most common legit `-R` use. Cost accepted: `-R <own-repo> pr merge` from inside the repo is indistinguishable and slips through — these gates are heuristic discipline, not security. For fork workflows, `gh repo set-default upstream` makes gh target upstream by default (no `-R` needed).
 - **Fail-closed**: unknown cwd / unresolvable repo / unparsable target → blocked.
-- **Read-only `--help`/`-h` never blocks** (token-boundary-guarded).
+- **Read-only `--help`/`-h` never blocks** — token-level carve-out in the rule's `unless` via `hasFlag` from `@cad0p/pi-steering-flags` (a help token inside a quoted value can't falsely exempt). The rule's flag parsing (target extraction, help carve-out) runs entirely on the walker-parsed argv via the flags helpers — the pattern is a pure router, no regex flag parsing.
+- **Glued short form `-Rcad0p/x`**: the flags helpers can't see it (walker keeps it as one word) → target unparsable → fail-closed block, even for the own-repo case. Accepted over-block; upstream gap filed as cad0p/pi-steering-flags#11.
 - **`repo create|new` is excluded by design**: nothing to cd into — the target is the positional argument (`gh repo create owner/name` works from any cwd, and the seed rule gates the actual create form).
 - **Slashless values** (`-R upstream`, a remote-name form) don't match — documented residual.
 
@@ -156,7 +157,7 @@ When the built-in predicate isn't enough, reach for the exported helpers inside 
 - `bodyHasClosingKeyword(ctx)` — does the body (stripped vault body-file content, or inline `--body`) carry a closing-keyword ref?
 - `unquote(text)` / `argText(ctx)` — low-level walker-word utilities.
 
-The pattern constants (`CLOSING_KEYWORD`, `ISSUE_REF`, `TITLE_WITH_REF`, `SUBJECT_WITH_REF`, `BODY_WITH_REF`, `PR_BODY_ANCHOR`, `PR_CREATE_ANCHOR`, `PR_MERGE_ANCHOR`, `ISSUE_BODY_ANCHOR`, `REPO_CREATE_ANCHOR`, `REPO_CREATE_SEED_FLAG`, `REPO_CREATE_PATTERN`, `REPO_FLAG`, `REPO_FLAG_ANCHOR`, `HELP_FLAG`) are exported too — they are what the rules ship, pinned by the unit tests. The rule objects (`ghRepoFlagBeforeSubcommand`, …) and the `repoName` helper are re-exported as well.
+The pattern constants (`CLOSING_KEYWORD`, `ISSUE_REF`, `TITLE_WITH_REF`, `SUBJECT_WITH_REF`, `BODY_WITH_REF`, `PR_BODY_ANCHOR`, `PR_CREATE_ANCHOR`, `PR_MERGE_ANCHOR`, `ISSUE_BODY_ANCHOR`, `REPO_CREATE_ANCHOR`, `REPO_CREATE_SEED_FLAG`, `REPO_CREATE_PATTERN`, `REPO_FLAG_ANCHOR`) are exported too — they are what the rules ship, pinned by the unit tests. The rule objects (`ghRepoFlagBeforeSubcommand`, …), the `foreignRepoReason` ReasonFn, and the `repoName` helper are re-exported as well.
 
 ## Known limitations
 
@@ -167,6 +168,7 @@ The pattern constants (`CLOSING_KEYWORD`, `ISSUE_REF`, `TITLE_WITH_REF`, `SUBJEC
 - **`-R` after the subcommand is not gated by `gh-repo-flag-before-subcommand`**: `gh pr create -R x/y …` still matches the pr anchors (no bypass), but the foreign target isn't redirected (the `-R` flag lands after the subcommand the anchors match). Different, smaller class — follow-up.
 - **Slashless `-R <remote>`** (remote-name form, no `/`) doesn't match the new rule's anchor — the fork→upstream flow passes through unchanged (allowed).
 - **`-R x/y repo create` stays ungated** by the redirect (the repo doesn't exist yet — nothing to cd into; `repo create` never needs `-R` since the target is the positional argument, and the seed rule gates the actual create form).
+- **`-Rcad0p/x` glued short form** (no space) is fail-closed-blocked even for the own-repo fork case — `hasFlag`/`getFlagValue` from `@cad0p/pi-steering-flags` can't see the value (walker keeps the glued word intact); the target is unparsable → block. Upstream gap: cad0p/pi-steering-flags#11.
 
 ## License
 

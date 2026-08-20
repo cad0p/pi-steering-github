@@ -90,7 +90,7 @@
  */
 
 import type { PredicateContext, Rule } from "@cad0p/pi-steering";
-import { hasFlag } from "@cad0p/pi-steering-flags";
+import { getFlagValue, hasFlag } from "@cad0p/pi-steering-flags";
 import { BODY_STRIP } from "./body-strip.ts";
 import {
   bodyHasClosingKeyword,
@@ -177,45 +177,22 @@ export const ISSUE_BODY_ANCHOR = /^gh\s+issue\s+(?:create|edit)\b/i;
 export const REPO_CREATE_ANCHOR = /^gh\s+repo\s+(?:create|new)\b/i;
 
 /**
- * A `-R`/`--repo` global-flag token with a `/`-containing value:
- * `-R x/y` / `--repo x/y` (space form), `--repo=x/y` (glued `=`
- * form), `-Rx/y` (glued short form). Token-boundary guarded — glued
- * lookalikes (`foo-R`, `-Rfoo` without a slash) never match. The
- * `/` requirement is deliberate: slashless remote-name forms
- * (`-R upstream`) are the fork→upstream flow (allowed, documented
- * residual) and don't target a foreign owner/repo.
+ * `gh-repo-flag-before-subcommand` pattern: a PURE ROUTER — `gh`
+ * with a `-R`/`--repo` global flag BEFORE the subcommand, a
+ * `/`-containing target, then a gated `pr create|new|edit|merge` or
+ * `issue create|edit`. It only decides "is this a `-R`-first gated
+ * command with a slash-target?" — all VALUE parsing (flag form,
+ * target extraction, help carve-out) happens on the walker argv via
+ * `@cad0p/pi-steering-flags`' `hasFlag`/`getFlagValue` in the rule's
+ * `unless` fn (arg layer, quote-aware). The `/` requirement is
+ * deliberate: slashless remote-name forms (`-R upstream`) are the
+ * fork→upstream flow (allowed, documented residual). Anchored
+ * `^gh\s` (no `echo gh …`). `repo create|new` is excluded by
+ * design; read-only `pr view`/`issue list` never route. See the
+ * rule doc comment.
  */
-export const REPO_FLAG =
-  `(?:^|\\s)(?:-R|--repo)\\s+[^\\s]+\\/[^\\s]+` +
-  `|(?:^|\\s)--repo=[^\\s]+\\/[^\\s]+` +
-  `|(?:^|\\s)-R[^\\s]+\\/[^\\s]+`;
-
-/**
- * A help flag as its own token: `--help` / `-h`, token-boundary
- * guarded (same shape as PR #20's `HELP_FLAG`). Read-only
- * introspection must never block.
- */
-export const HELP_FLAG = `(?:^|\\s)(?:--help|-h)(?=\\s|$)`;
-
-/**
- * `gh-repo-flag-before-subcommand` pattern: `-R`/`--repo` BEFORE the
- * subcommand, targeting an owner/repo (`/`-containing value, all
- * four typed forms), followed by a gated `pr create|new|edit|merge`
- * or `issue create|edit`. Read-only `--help`/`-h` anywhere in the
- * command never matches (token-boundary-guarded `HELP_FLAG`, same
- * shape as PR #20's). Anchored `^gh\s` (no `echo gh …`).
- * `repo create|new` is excluded by design. See the rule doc comment.
- */
-export const REPO_FLAG_ANCHOR = new RegExp(
-  `^gh\\s+(?:-R\\s+[^\\s]+\\/[^\\s]+` +
-    `|--repo\\s+[^\\s]+\\/[^\\s]+` +
-    `|--repo=[^\\s]+\\/[^\\s]+` +
-    `|-R[^\\s]+\\/[^\\s]+)\\s+(?:pr\\s+(?:create|new|edit|merge)` +
-    `|issue\\s+(?:create|edit))\\b` +
-    `(?![\\s\\S]*${HELP_FLAG})`,
-  "i",
-);
-
+export const REPO_FLAG_ANCHOR =
+  /^gh\s+(?:-R\s+\S*\/\S+|--repo\s+\S*\/\S+|--repo=\S*\/\S+|-R\S*\/\S+)\s+(?:pr\s+(?:create|new|edit|merge)|issue\s+(?:create|edit))\b/i;
 /**
  * A seed flag as its own token: long or short form, ` ` or `=`
  * value forms. Token-boundary guarded — glued lookalikes
@@ -271,8 +248,22 @@ export const ghRepoFlagBeforeSubcommand = {
   field: "command",
   pattern: REPO_FLAG_ANCHOR,
   unless: async (ctx: PredicateContext) => {
-    const target = parseRepoFlagTarget(ctx);
-    if (target === null) return false; // unparsable target → fail-closed
+    const args = ctx.input.args ?? [];
+    // Help is read-only introspection — never a foreign redirect.
+    // Token-level (exact flag tokens on the walker argv, quote-aware):
+    // a `--help` inside a QUOTED VALUE (`--subject "see --help"`) does
+    // NOT exempt — that value is still a real gated command. (Same
+    // shape as the merge rule's carve-out; NOT `INFO_ONLY`, whose
+    // string-layer `\b` has the quoted-value hole.)
+    if (hasFlag(args, "--help") || hasFlag(args, "-h")) return true;
+    // The `-R`/`--repo` target, via `@cad0p/pi-steering-flags`
+    // (arg layer, quote-aware, `--flag=value` + `--flag value` forms).
+    // Glued short form `-Rcad0p/x` is INVISIBLE to the helpers (the
+    // walker keeps it as one word) — `getFlagValue` returns null →
+    // fail-closed block (accepted over-block; upstream gap filed as
+    // cad0p/pi-steering-flags#11).
+    const target = getFlagValue(args, "-R") ?? getFlagValue(args, "--repo");
+    if (target === null || target === "") return false; // fail-closed
     const cwd = ctx.cwd;
     if (typeof cwd !== "string" || cwd === "unknown") return false;
     const repo = await repoName(ctx, cwd);
@@ -288,34 +279,12 @@ export const ghRepoFlagBeforeSubcommand = {
 } as const satisfies Rule;
 
 /**
- * The `-R`/`--repo` target parsed from the walker args: the flag
- * word (`-R` / `--repo` + next word, `--repo=value` glued,
- * `-Rvalue` glued). `null` when absent or unparsable (fail-closed).
- */
-export function parseRepoFlagTarget(ctx: PredicateContext): string | null {
-  const words = ctx.input.args ?? [];
-  for (let i = 0; i < words.length; i++) {
-    const t = words[i]?.text ?? "";
-    if (t === "-R" || t === "--repo") {
-      const value = words[i + 1]?.text ?? "";
-      return value !== "" ? value : null;
-    }
-    if (t.startsWith("--repo=")) {
-      return t.slice("--repo=".length);
-    }
-    if (t.startsWith("-R")) {
-      return t.slice(2);
-    }
-  }
-  return null;
-}
-
-/**
  * The dynamic block reason for `gh-repo-flag-before-subcommand`:
  * echoes the subcommand (PR/issue) and the `-R`/`--repo` target AS
- * TYPED. Never throws — static fallback on unparsable args (the
- * evaluator's fail-safe would still land the block verdict, but keep
- * it clean).
+ * TYPED. Arg-layer word scan only (display, not flag parsing — no
+ * regex over the raw string). Never throws — static fallback on
+ * unparsable args (the evaluator's fail-safe would still land the
+ * block verdict, but keep it clean).
  */
 export function foreignRepoReason(ctx: PredicateContext): string {
   const words = ctx.input.args ?? [];

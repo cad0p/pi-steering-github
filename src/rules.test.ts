@@ -26,19 +26,16 @@ import {
   foreignRepoReason,
   ghRepoCreateNeedsSeed,
   ghRepoFlagBeforeSubcommand,
-  HELP_FLAG,
   ISSUE_BODY_ANCHOR,
   ISSUE_REF,
   issueBodyFromVaultFile,
   PR_BODY_ANCHOR,
   PR_CREATE_ANCHOR,
   PR_MERGE_ANCHOR,
-  parseRepoFlagTarget,
   prBodyFromVaultFile,
   prCreateNeedsIssueLink,
   prMergeNeedsClosingKeywords,
   REPO_CREATE_PATTERN,
-  REPO_FLAG,
   REPO_FLAG_ANCHOR,
   rules,
   SUBJECT_WITH_REF,
@@ -88,7 +85,7 @@ describe("github plugin — pattern constants", () => {
 });
 
 describe("github plugin — gh-repo-flag-before-subcommand (normalized form)", () => {
-  it("anchors -R/--repo BEFORE the subcommand with a /-containing target", () => {
+  it("routes -R/--repo BEFORE the subcommand with a /-containing target", () => {
     assert.equal(
       blocked(REPO_FLAG_ANCHOR, "gh -R cad0p/x pr create --title t"),
       true,
@@ -125,7 +122,7 @@ describe("github plugin — gh-repo-flag-before-subcommand (normalized form)", (
     );
   });
 
-  it("does not match slashless remotes, read-only forms, excluded subcommands, or -R after the subcommand", () => {
+  it("does not route slashless remotes, read-only forms, excluded subcommands, or -R after the subcommand", () => {
     assert.equal(
       blocked(REPO_FLAG_ANCHOR, "gh -R upstream pr create --title t"),
       false,
@@ -158,28 +155,24 @@ describe("github plugin — gh-repo-flag-before-subcommand (normalized form)", (
     );
   });
 
-  it("--help/-h (read-only) never blocks", () => {
+  it("the anchor is a pure router: --help/-h and non-repo flags still route, the UNLESS decides", () => {
+    // The anchor does NOT decide help — the token-level `unless`
+    // carve-out does (so a `--help` inside a quoted value never
+    // falsely exempts). These route to the rule and are allowed by
+    // the `unless` fn.
     assert.equal(
       blocked(REPO_FLAG_ANCHOR, "gh -R cad0p/x pr merge --help"),
-      false,
+      true,
     );
-    assert.equal(blocked(REPO_FLAG_ANCHOR, "gh -R cad0p/x pr merge -h"), false);
+    assert.equal(blocked(REPO_FLAG_ANCHOR, "gh -R cad0p/x pr merge -h"), true);
     assert.equal(
       blocked(REPO_FLAG_ANCHOR, "gh -R cad0p/x pr merge --squash --help"),
-      false,
+      true,
     );
     assert.equal(
       blocked(REPO_FLAG_ANCHOR, "gh -R cad0p/x pr merge --squash -h"),
-      false,
+      true,
     );
-    assert.equal(
-      blocked(
-        REPO_FLAG_ANCHOR,
-        "gh --repo=cad0p/x issue create --title t --help",
-      ),
-      false,
-    );
-    // Glued lookalikes must NOT exempt (token-boundary guard).
     assert.equal(
       blocked(REPO_FLAG_ANCHOR, "gh -R cad0p/x pr merge --squash --helper"),
       true,
@@ -188,41 +181,14 @@ describe("github plugin — gh-repo-flag-before-subcommand (normalized form)", (
       blocked(REPO_FLAG_ANCHOR, "gh -R cad0p/x pr merge --squash -hx"),
       true,
     );
-    // --help=value is not a help flag.
+    // --help=value is not a help flag token — routes; unless fails
+    // to carve out (hasFlag matches --help= via its attached-value
+    // prefix, so it DOES exempt — harmless invalid invocation; the
+    // behavior delta vs the old regex is pinned in the unless tests).
     assert.equal(
       blocked(REPO_FLAG_ANCHOR, "gh -R cad0p/x pr merge --squash --help="),
       true,
     );
-  });
-
-  it("REPO_FLAG is a token-guarded -R/--repo matcher requiring a /-containing value", () => {
-    assert.equal(blocked(REPO_FLAG, "gh -R cad0p/x pr create --title t"), true);
-    assert.equal(
-      blocked(REPO_FLAG, "gh --repo cad0p/x pr create --title t"),
-      true,
-    );
-    assert.equal(
-      blocked(REPO_FLAG, "gh --repo=cad0p/x issue create --title t"),
-      true,
-    );
-    assert.equal(blocked(REPO_FLAG, "gh -Rcad0p/x issue edit 3"), true);
-    // Slashless remote-name forms never match.
-    assert.equal(blocked(REPO_FLAG, "gh -R upstream pr create"), false);
-    // Glued lookalikes never match.
-    assert.equal(blocked(REPO_FLAG, "gh foo-R cad0p/x pr create"), false);
-    assert.equal(blocked(REPO_FLAG, "gh -Rfoo pr create"), false);
-  });
-
-  it("HELP_FLAG is a token-boundary-guarded help token", () => {
-    const re = new RegExp(HELP_FLAG, "i");
-    assert.equal(re.test(" --help"), true);
-    assert.equal(re.test("--help "), true);
-    assert.equal(re.test(" -h"), true);
-    assert.equal(re.test("-h"), true);
-    // Glued lookalikes never match.
-    assert.equal(re.test("--helper"), false);
-    assert.equal(re.test("-hx"), false);
-    assert.equal(re.test("--help="), false);
   });
 });
 
@@ -503,6 +469,69 @@ describe("github plugin — gh-repo-flag-before-subcommand unless (basename matc
     });
     assert.equal(await ghRepoFlagBeforeSubcommand.unless!(ctx), false);
   });
+
+  it("allows --repo=x/y (glued long form) same-basename — getFlagValue sees it", async () => {
+    const ctx = ctxWith(
+      "gh --repo=cad0p/pi-steering-github pr merge --squash",
+      {
+        remote: "https://github.com/cad0p/pi-steering-github.git",
+      },
+    );
+    assert.equal(await ghRepoFlagBeforeSubcommand.unless!(ctx), true);
+  });
+
+  it("BEHAVIOR DELTA: own-repo glued short form -Rcad0p/x now BLOCKS (fail-closed)", async () => {
+    // `getFlagValue` cannot see `-Rcad0p/x` (the walker keeps it as
+    // ONE word; the flags helpers match bare `-R` / `--repo=` only).
+    // Target unparsable → cannot prove same-repo → block. Accepted
+    // over-block (upstream gap cad0p/pi-steering-flags#11). This
+    // pins the delta vs the old `parseRepoFlagTarget` (which allowed).
+    const ctx = ctxWith("gh -Rcad0p/pi-steering-github pr create --title t", {
+      remote: "https://github.com/cad0p/pi-steering-github.git",
+    });
+    assert.equal(await ghRepoFlagBeforeSubcommand.unless!(ctx), false);
+  });
+
+  it("help carve-out is token-level: bare --help/-h allow, quoted-value and glued do NOT", async () => {
+    // Bare help tokens → allow (read-only introspection).
+    const helpCtx = ctxWith("gh -R cad0p/other pr merge --help", {
+      remote: "https://github.com/cad0p/pi-steering-github.git",
+    });
+    assert.equal(await ghRepoFlagBeforeSubcommand.unless!(helpCtx), true);
+    const hCtx = ctxWith("gh -R cad0p/other pr merge -h", {
+      remote: "https://github.com/cad0p/pi-steering-github.git",
+    });
+    assert.equal(await ghRepoFlagBeforeSubcommand.unless!(hCtx), true);
+    // A `--help` inside a QUOTED VALUE is a real gated command —
+    // must NOT exempt (the old regex negative-lookahead had this
+    // hole; the token-level carve-out does not).
+    const quotedCtx = ctxWith(
+      'gh -R cad0p/other pr merge --subject "see --help"',
+      { remote: "https://github.com/cad0p/pi-steering-github.git" },
+    );
+    assert.equal(await ghRepoFlagBeforeSubcommand.unless!(quotedCtx), false);
+    // Glued lookalikes are not help tokens.
+    const helperCtx = ctxWith("gh -R cad0p/other pr merge --squash --helper", {
+      remote: "https://github.com/cad0p/pi-steering-github.git",
+    });
+    assert.equal(await ghRepoFlagBeforeSubcommand.unless!(helperCtx), false);
+    const hxCtx = ctxWith("gh -R cad0p/other pr merge --squash -hx", {
+      remote: "https://github.com/cad0p/pi-steering-github.git",
+    });
+    assert.equal(await ghRepoFlagBeforeSubcommand.unless!(hxCtx), false);
+  });
+
+  it("BEHAVIOR DELTA: --help= now EXEMPTS (hasFlag attached-value prefix match)", async () => {
+    // `hasFlag(args, "--help")` treats `--help=` as the attached-value
+    // form of `--help` (startsWith `--help=`) → carve-out fires. The
+    // old token-boundary regex blocked `--help=`. `--help=` is an
+    // invalid gh invocation (errors, never mutates) — harmless; pin
+    // the flip so it can't change silently.
+    const ctx = ctxWith("gh -R cad0p/other pr merge --squash --help=", {
+      remote: "https://github.com/cad0p/pi-steering-github.git",
+    });
+    assert.equal(await ghRepoFlagBeforeSubcommand.unless!(ctx), true);
+  });
 });
 
 describe("github plugin — gh-repo-flag-before-subcommand ReasonFn (dynamic)", () => {
@@ -559,27 +588,6 @@ describe("github plugin — gh-repo-flag-before-subcommand ReasonFn (dynamic)", 
         "REQUIREMENT: run a foreign subagent maintainer loop until good,\n" +
         "then cd into the foreign repo and target it from there.",
     );
-  });
-
-  it("parseRepoFlagTarget: all four typed forms", () => {
-    const c = (cmd: string) =>
-      ctxWith(cmd) as Parameters<typeof parseRepoFlagTarget>[0];
-    assert.equal(parseRepoFlagTarget(c("gh -R cad0p/x pr create")), "cad0p/x");
-    assert.equal(
-      parseRepoFlagTarget(c("gh --repo cad0p/x pr create")),
-      "cad0p/x",
-    );
-    assert.equal(
-      parseRepoFlagTarget(c("gh --repo=cad0p/x pr create")),
-      "cad0p/x",
-    );
-    assert.equal(parseRepoFlagTarget(c("gh -Rcad0p/x pr create")), "cad0p/x");
-    // Slashless / absent → null (fail-closed).
-    assert.equal(
-      parseRepoFlagTarget(c("gh -R upstream pr create")),
-      "upstream",
-    );
-    assert.equal(parseRepoFlagTarget(c("gh pr create --title t")), null);
   });
 });
 
