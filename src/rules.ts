@@ -325,21 +325,20 @@ export function foreignRepoReason(ctx: PredicateContext): string {
       target = words[i + 1]?.text ?? "";
       break;
     }
-    if (t.startsWith("--repo=")) {
-      flag = "--repo=";
-      target = t.slice("--repo=".length);
-      break;
-    }
-    if (t.startsWith("-R")) {
-      flag = "-R";
-      target = t.slice(2);
+    if (t.startsWith("--repo=") || t.startsWith("-R")) {
+      // Glued form: the flag+value is ONE word — echo it verbatim
+      // ("--repo=cad0p/x", "-Rcad0p/x").
+      flag = t;
       break;
     }
   }
   const what = /\bpr\b/i.test(words.map((w) => w.text).join(" "))
     ? "PR"
     : "issue";
-  const via = target !== null && target !== "" ? `${flag} ${target}` : flag;
+  // Space form: `-R <target>` / `--repo <target>`. Glued form: the
+  // word IS the flag+value (`--repo=x/y`, `-Rx/y`) — echo verbatim.
+  const via =
+    target !== null && target !== "" ? `${flag} ${target}` : flag;
   return (
     `The ${what} you're targeting via ${via} belongs to a foreign repo.\n` +
     `REQUIREMENT: run a foreign subagent maintainer loop until good,\n` +

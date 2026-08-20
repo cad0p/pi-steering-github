@@ -227,10 +227,12 @@ describe("github plugin — shape", () => {
   it("registers strict rules in roster order with the vault predicate", () => {
     const plugin = config.plugins?.find((p) => p.name === "github");
     assert.ok(plugin, "github plugin should be registered");
-    // Body-file rule first — first-match-wins routing.
+    // Entry gate first — the `-R` attempt is the first rule an
+    // agent can meet; first-match-wins routing.
     assert.deepEqual(
       plugin?.rules?.map((r) => r.name),
       [
+        "gh-repo-flag-before-subcommand",
         "pr-body-from-vault-file",
         "pr-create-needs-issue-link",
         "pr-merge-needs-closing-keywords",
