@@ -337,8 +337,7 @@ export function foreignRepoReason(ctx: PredicateContext): string {
     : "issue";
   // Space form: `-R <target>` / `--repo <target>`. Glued form: the
   // word IS the flag+value (`--repo=x/y`, `-Rx/y`) — echo verbatim.
-  const via =
-    target !== null && target !== "" ? `${flag} ${target}` : flag;
+  const via = target !== null && target !== "" ? `${flag} ${target}` : flag;
   return (
     `The ${what} you're targeting via ${via} belongs to a foreign repo.\n` +
     `REQUIREMENT: run a foreign subagent maintainer loop until good,\n` +

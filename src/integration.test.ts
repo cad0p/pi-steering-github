@@ -204,7 +204,11 @@ async function evaluateBash(
   cwd: string,
   command: string,
   host: ReturnType<typeof createRecordingHost> = hostOnMainGithub(),
-): Promise<{ block: boolean; rule: string | null | undefined }> {
+): Promise<{
+  block: boolean;
+  rule: string | null | undefined;
+  reason: string;
+}> {
   const ctx = mockExtensionContext(cwd, host.entries);
   const harness = loadHarness({ config, host, includeDefaults: true });
   const event = {
@@ -215,12 +219,12 @@ async function evaluateBash(
   } as unknown as Parameters<typeof harness.evaluate>[0];
   const result = await harness.evaluate(event, ctx, 1);
   if (result === undefined || result === null || result.block !== true) {
-    return { block: false, rule: null };
+    return { block: false, rule: null, reason: "" };
   }
   const raw = result.reason ?? "";
   const reason = typeof raw === "string" ? raw : String(raw);
   const match = reason.match(/^\[steering:([^@\]]+)(?:@[^\]]+)?\]/);
-  return { block: true, rule: match ? match[1] : null };
+  return { block: true, rule: match ? match[1] : null, reason };
 }
 
 describe("github plugin — shape", () => {
@@ -569,6 +573,105 @@ describe("github plugin — PR rules (issue-link + vault body-file policy)", () 
       host,
     );
     assert.equal(blockClose, false, `expected allow, got block by ${rule}`);
+  });
+});
+
+describe("github plugin — gh-repo-flag-before-subcommand (foreign -R redirect)", () => {
+  const repo = "fixture-repo";
+  const remote = `https://github.com/cad0p/${repo}.git`;
+  const host = hostWithRemote(remote);
+
+  it("blocks foreign gh -R pr merge (rule name in the reason tag)", async () => {
+    const { block, rule } = await evaluateBash(
+      makeFixtureDir(),
+      "gh -R cad0p/other pr merge --squash",
+      host,
+    );
+    assert.equal(block, true, "expected block");
+    assert.equal(rule, "gh-repo-flag-before-subcommand");
+  });
+
+  it("MUST-BLOCK repro pin: keyword-carrying foreign merge (the exact #19 under-block)", async () => {
+    const { block, rule } = await evaluateBash(
+      makeFixtureDir(),
+      `gh -R cad0p/other pr merge --squash --subject "fix: x (closes #12)"`,
+      host,
+    );
+    assert.equal(block, true, "expected block");
+    assert.equal(rule, "gh-repo-flag-before-subcommand");
+  });
+
+  it("blocks the glued --repo= form for issue create", async () => {
+    const { block, rule } = await evaluateBash(
+      makeFixtureDir(),
+      "gh --repo=cad0p/other issue create --title t",
+      host,
+    );
+    assert.equal(block, true, "expected block");
+    assert.equal(rule, "gh-repo-flag-before-subcommand");
+  });
+
+  it("reason text e2e: tagged rule name + the foreign-repo redirect", async () => {
+    // The plugin's FIRST dynamic reason deserves a full-pipeline
+    // pin: the prefixed tag AND the redirect text must reach the
+    // agent verbatim.
+    const { block, rule, reason } = await evaluateBash(
+      makeFixtureDir(),
+      "gh -R cad0p/other pr merge --squash",
+      host,
+    );
+    assert.equal(block, true, "expected block");
+    assert.equal(rule, "gh-repo-flag-before-subcommand");
+    assert.match(reason, /^\[steering:gh-repo-flag-before-subcommand@/);
+    assert.match(
+      reason,
+      /The PR you're targeting via -R cad0p\/other belongs to a foreign repo\./,
+    );
+    assert.match(
+      reason,
+      /REQUIREMENT: run a foreign subagent maintainer loop until good,/,
+    );
+    assert.match(
+      reason,
+      /then cd into the foreign repo and target it from there\./,
+    );
+  });
+
+  it("allows the fork→upstream flow (target basename == cwd repo basename)", async () => {
+    const { block, rule } = await evaluateBash(
+      makeFixtureDir(),
+      "gh -R upstream/fixture-repo pr create --title t",
+      host,
+    );
+    assert.equal(block, false, `expected allow, got block by ${rule}`);
+  });
+
+  it('blocks on walker-unknown cwd (cd "$X") — fail-closed', async () => {
+    const { block, rule } = await evaluateBash(
+      makeFixtureDir(),
+      `cd "$X" && gh -R cad0p/other pr merge --squash`,
+      host,
+    );
+    assert.equal(block, true, "expected block");
+    assert.equal(rule, "gh-repo-flag-before-subcommand");
+  });
+
+  it("allows read-only / excluded forms (pr view, issue list, repo create, --help)", async () => {
+    const cases: Array<[string, boolean]> = [
+      ["gh -R cad0p/other pr view 12", false],
+      ["gh -R cad0p/other issue list", false],
+      ["gh -R cad0p/other repo create foo", false],
+      ["gh -R cad0p/other pr merge --help", false],
+      ["gh -R cad0p/other pr merge -h", false],
+    ];
+    for (const [cmd, expectedBlock] of cases) {
+      const { block, rule } = await evaluateBash(makeFixtureDir(), cmd, host);
+      assert.equal(
+        block,
+        expectedBlock,
+        `command \`${cmd}\`: expected ${expectedBlock ? "block" : "allow"}, got block by ${rule}`,
+      );
+    }
   });
 });
 
