@@ -4,23 +4,56 @@ GitHub workflow rules for [pi-steering](https://github.com/cad0p/pi-steering): e
 
 ## What it ships
 
-One `Plugin` (`name: "github"`) with five rules and one predicate:
+One `Plugin` (`name: "github"`) with six rules and one predicate:
 
 | Rule | Fires on | Blocks when |
 | --- | --- | --- |
+| `gh-repo-flag-before-subcommand` | `gh -R/--repo <x/y> pr create \| new \| edit \| merge \| issue create \| edit` | the `-R`/`--repo` target is a FOREIGN repo (basename differs from the cwd repo) — redirect: run a foreign subagent maintainer loop until good, then cd into the foreign repo and target it from there |
 | `pr-body-from-vault-file` | `gh pr create \| new \| edit` | the body doesn't come from `--body-file <(perl -0777 -pe '<BODY_STRIP>' <file>)` — a process substitution running the pinned perl one-liner (direct paths and inline `--body` are blocked) |
 | `pr-create-needs-issue-link` | `gh pr create \| new` | the `--title` value or the body lacks a closing keyword + `#N` |
 | `pr-merge-needs-closing-keywords` | `gh pr merge` | the `--subject` value lacks a closing keyword + `#N` |
 
 | `issue-body-from-vault-file` | `gh issue create \| edit` | the body doesn't come from `--body-file` pointing at a `<repo>/issues/` napkin-vault file |
 | `gh-repo-create-needs-seed` | `gh repo create \| new` | no seed flag present (`--add-readme`, `--gitignore\|-g`, `--license\|-l`, `--template\|-p`) — a bare create births an EMPTY repo |
->>>>>>> origin/main
 
 | Predicate | Purpose |
 | --- | --- |
 | `missingVaultBodyFile` | true when `--body-file` is absent, not the pinned `<(perl -0777 -pe '<BODY_STRIP>' <file>)` substitution form, or the path fails the vault check (nonexistent, outside a napkin vault, not under `<repo>/<section>/`) |
 
 All rules are **strict** — no `noOverride: false`, so there is no agent-side override escape hatch. The policy is unconditional.
+
+## Source layout
+
+The package mirrors the canonical `examples/work-item-plugin` layout — one file per rule / predicate / helper concern:
+
+```
+src/
+├── index.ts                        # plugin assembly + declare global + re-exports
+├── integration.test.ts             # end-to-end pipeline tests
+├── body-strip.ts                   # the pinned perl body-strip one-liner (leaf)
+├── body-strip.test.ts              # perl behavior pins (fixture matrix)
+├── helpers/
+│   ├── pattern-args.ts             # argText, unquote, findFlagValue, findBodyFileValue, parseBodyFileArg, resolveAgainstCwd
+│   ├── pattern-args.test.ts
+│   ├── body-keyword.ts             # bodyHasClosingKeyword
+│   ├── body-keyword.test.ts
+│   └── repo-name.ts                # repoName
+├── predicates/
+│   ├── index.ts                    # bundle re-exports
+│   ├── missing-vault-body-file.ts  # the predicate handler
+│   └── missing-vault-body-file.test.ts
+└── rules/
+    ├── index.ts                    # the rules roster + bundle re-exports
+    ├── patterns.ts                 # pattern constants (leaf)
+    ├── patterns.test.ts
+    ├── command-anchors.test.ts
+    ├── gh-repo-flag-before-subcommand.ts + .test.ts
+    ├── pr-body-from-vault-file.ts
+    ├── pr-create-needs-issue-link.ts
+    ├── pr-merge-needs-closing-keywords.ts + .test.ts
+    ├── issue-body-from-vault-file.ts
+    └── gh-repo-create-needs-seed.ts + .test.ts
+```
 
 ## Install
 
@@ -158,7 +191,7 @@ When the built-in predicate isn't enough, reach for the exported helpers inside 
 - `isInfoOnly(args, extraFlags?)` from `@cad0p/pi-steering-flags` — token-level info-only check for `--help`/`--version` plus additive CLI-specific flags such as `-h`; quote-aware, including attached forms.
 - `unquote(text)` / `argText(ctx)` — low-level walker-word utilities.
 
-The pattern constants (`CLOSING_KEYWORD`, `ISSUE_REF`, `TITLE_WITH_REF`, `SUBJECT_WITH_REF`, `BODY_WITH_REF`, `PR_BODY_ANCHOR`, `PR_CREATE_ANCHOR`, `PR_MERGE_ANCHOR`, `ISSUE_BODY_ANCHOR`, `REPO_CREATE_ANCHOR`, `REPO_CREATE_SEED_FLAG`, `REPO_CREATE_PATTERN`, `REPO_FLAG_ANCHOR`) are exported too — they are what the rules ship, pinned by the unit tests. The rule objects (`ghRepoFlagBeforeSubcommand`, …), the `foreignRepoReason` ReasonFn, and the `repoName` helper are re-exported as well.
+The pattern constants (`CLOSING_KEYWORD`, `ISSUE_REF`, `TITLE_WITH_REF`, `SUBJECT_WITH_REF`, `BODY_WITH_REF`, `PR_BODY_ANCHOR`, `PR_CREATE_ANCHOR`, `PR_MERGE_ANCHOR`, `ISSUE_BODY_ANCHOR`, `REPO_CREATE_ANCHOR`, `REPO_CREATE_SEED_FLAG`, `REPO_CREATE_PATTERN`, `REPO_FLAG_ANCHOR`) are exported too — they are what the rules ship, pinned by the unit tests. The rule objects (`ghRepoFlagBeforeSubcommand`, …), the `foreignRepoReason` ReasonFn (module-exported from `src/rules/gh-repo-flag-before-subcommand.ts`), and the `repoName` helper (from `src/helpers/repo-name.ts`) are re-exported as well.
 
 ## Known limitations
 
