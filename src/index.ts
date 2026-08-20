@@ -21,7 +21,7 @@
  *     constants, and the arg helpers re-exported for unit tests and
  *     `when.condition` escape-hatch use.
  *
- * The plugin ships five rules, all STRICT (no `noOverride: false` —
+ * The plugin ships six rules, all STRICT (no `noOverride: false` —
  * the schema defaults fail-closed, so the policy is unconditional):
  *
  *   - `pr-body-from-vault-file`      — PR bodies come from vault
@@ -38,6 +38,11 @@
  *                                      carry a seed flag; a bare
  *                                      create births an EMPTY repo.
  *
+ *   - `gh-repo-flag-before-subcommand` — flag-first `gh -R x/y
+ *                                      pr|issue …` targets a FOREIGN
+ *                                      repo — redirect (foreign
+ *                                      subagent maintainer loop).
+ *
  * See this package's README for usage examples and the per-rule
  * rationale, and the pi-steering README "Writing plugins" section for
  * the design rationale.
@@ -49,8 +54,8 @@
  */
 
 import type { Plugin, PredicateShape } from "@cad0p/pi-steering";
-import { missingVaultBodyFile } from "./predicates/missing-vault-body-file.ts";
-import { rules } from "./rules.ts";
+import { missingVaultBodyFile } from "./predicates/index.ts";
+import { rules } from "./rules/index.ts";
 
 declare global {
   interface PiSteeringPredicates {
@@ -81,7 +86,8 @@ declare global {
  * fiddling with keywords, then the issue-link rule, then merge, then
  * the issue body-file rule, then `gh-repo-create-needs-seed` (no
  * anchor overlap — `gh repo …` shares no prefix with the
- * `gh pr|issue …` anchors). See `./rules.ts` for the rationale.
+ * `gh pr|issue …` anchors). See `./rules/index.ts` for the
+ * rationale.
  */
 export const githubPlugin = {
   name: "github",
@@ -101,7 +107,7 @@ export {
   parseBodyFileArg,
   resolveAgainstCwd,
   unquote,
-} from "./predicates/missing-vault-body-file.ts";
+} from "./predicates/index.ts";
 // Named re-exports for consumers that want to pick pieces: the
 // shipped rules (or the `rules` roster itself), the pattern constants
 // (pinned by the unit tests), the predicate handler, and the arg
@@ -129,4 +135,4 @@ export {
   rules,
   SUBJECT_WITH_REF,
   TITLE_WITH_REF,
-} from "./rules.ts";
+} from "./rules/index.ts";

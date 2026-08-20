@@ -32,7 +32,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
-import { BODY_STRIP } from "./predicates/missing-vault-body-file.ts";
+import { BODY_STRIP } from "./body-strip.ts";
 
 const fixtures: string[] = [];
 
