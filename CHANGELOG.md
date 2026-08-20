@@ -19,6 +19,7 @@ All notable changes to this project will be documented in this file.
 - Restore vault path validation in missingVaultBodyFile (closes #12)
 - *(rules)* Merge gate requires the closing keyword in --subject only (closes #15)
 - (closes #17) pr-merge gate must not block gh pr merge --help
+- *(rules)* Ship gh-repo-flag-before-subcommand — roster missing the -R gate (closes #19)
 
 ### 🚜 Refactor
 
