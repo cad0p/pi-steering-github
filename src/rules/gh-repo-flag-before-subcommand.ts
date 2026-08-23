@@ -117,11 +117,13 @@ export const ghRepoFlagBeforeSubcommand = {
  * occur (echoing an overridden earlier alias would misdirect the cd).
  * Arg-layer word scan only (display, not flag parsing — no regex over
  * the raw string): RIGHT→LEFT, at each position bare `-R`/`--repo`
- * first (echo flag + next word), then glued forms (`--repo=…` /
- * `-R…`, echo the whole word verbatim); the first match from the
- * right wins regardless of form. Never throws — static fallback on
- * unparsable args (the evaluator's fail-safe would still land the
- * block verdict, but keep it clean).
+ * first (echo flag + next word), then glued forms — `--repo=…` via
+ * the same `=` prefix the helper matches, `-R…` ONLY when the
+ * remainder looks like a slashful target (the helper exact-matches
+ * the bare `-R` token, so a value word merely starting with `-R`
+ * must not hijack the echo). First match from the right wins.
+ * Never throws — static fallback on unparsable args (the evaluator's
+ * fail-safe would still land the block verdict, but keep it clean).
  */
 export function foreignRepoReason(ctx: PredicateContext): string {
   const words = ctx.input.args ?? [];
@@ -134,19 +136,36 @@ export function foreignRepoReason(ctx: PredicateContext): string {
       target = words[i + 1]?.text ?? "";
       break;
     }
-    if (t.startsWith("--repo=") || t.startsWith("-R")) {
-      // Glued form: the flag+value is ONE word — echo it verbatim
-      // ("--repo=cad0p/x", "-Rcad0p/x").
+    if (t.startsWith("--repo=")) {
+      // Glued long form: the flag+value is ONE word — echo it
+      // verbatim ("--repo=cad0p/x"). Mirrors getFlagValue's
+      // `${flag}=` prefix match exactly, so a quoted VALUE that
+      // happens to look like `--repo=x/y` wins BOTH the resolution
+      // and the echo — consistent display.
+      flag = t;
+      break;
+    }
+    if (/^-R[^=\s]*\/\S*$/.test(t)) {
+      // Glued SHORT form (`-Rcad0p/x`): require a SLASHFUL remainder —
+      // repo targets always contain `/`. getFlagValue only exact-
+      // matches the `-R` token, so an arbitrary value word starting
+      // with `-R` (e.g. a body value "-Rebased onto main") is
+      // invisible to the RESOLUTION; the echo must stay equally blind
+      // or it would hijack the redirect text with garbage. Slashless
+      // `-R…` words fall through to earlier positions.
       flag = t;
       break;
     }
   }
   // The subcommand is the FIRST exact `pr`/`issue` TOKEN in the argv.
   // Exact tokens only: the walker keeps quoted values as single words,
-  // so a subject like "fix pr bug" or a target like `cad0p/pr-mirror`
-  // can never match. (Positional detection relative to the flag+value
-  // broke with the right→left scan above: the winning alias may sit at
-  // the line's end, past any subcommand.)
+  // so MULTI-WORD values like "fix pr bug" can never match. (Accepted
+  // display-only limitation: a single-word root-flag value that is
+  // exactly `pr`/`issue` and precedes the subcommand could still
+  // mislabel the PR/issue noun — contrived, verdict unaffected.
+  // Positional detection relative to the flag+value broke with the
+  // right→left scan above: the winning alias may sit at the line's
+  // end, past any subcommand.)
   const subWord = words.find(
     (w) => (w?.text ?? "") === "pr" || (w?.text ?? "") === "issue",
   );

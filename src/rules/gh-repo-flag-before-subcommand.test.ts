@@ -360,4 +360,21 @@ describe("github plugin — gh-repo-flag-before-subcommand ReasonFn (dynamic)", 
         "then cd into the foreign repo and target it from there.",
     );
   });
+
+  it("a value word starting with -R does NOT hijack the echo (slashful-glued guard)", () => {
+    // The glued SHORT branch only accepts words shaped like repo
+    // targets (`-R…/…`); getFlagValue exact-matches the bare `-R`
+    // token, so a quoted VALUE like "-Rebased onto main" is invisible
+    // to the resolution — the echo must stay equally blind and keep
+    // echoing the real (anchor-guaranteed) leading repo flag.
+    const reason = foreignRepoReason(
+      ctxWith('gh --repo cad0p/other pr create --body "-Rebased onto main"'),
+    );
+    assert.equal(
+      reason,
+      "The PR you're targeting via --repo cad0p/other belongs to a foreign repo.\n" +
+        "REQUIREMENT: run a foreign subagent maintainer loop until good,\n" +
+        "then cd into the foreign repo and target it from there.",
+    );
+  });
 });
