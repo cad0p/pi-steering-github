@@ -78,11 +78,17 @@ export const ghRepoFlagBeforeSubcommand = {
     if (!isRepoFlag) return true; // not a repo-targeting command
     // The `-R`/`--repo` target, via `@cad0p/pi-steering-flags`
     // (arg layer, quote-aware, `--flag=value` + `--flag value` forms).
-    // Glued short form `-Rcad0p/x` is INVISIBLE to the helpers (the
-    // walker keeps it as one word) — `getFlagValue` returns null →
-    // fail-closed block (accepted over-block; upstream gap filed as
+    // The alias SET makes the resolution LAST-wins across `-R`/`--repo`
+    // (gh/cobra collapse repeated spellings of one logical flag to the
+    // final value) — the old `??` composition let the FIRST-seen alias
+    // win and miss a cross-alias override (issue #34). A trailing
+    // valueless alias or an empty attached value as the last occurrence
+    // wins and fail-closes (null / "" → block below). Glued short form
+    // `-Rcad0p/x` is INVISIBLE to the helpers (the walker keeps it as
+    // one word) — `getFlagValue` returns null → fail-closed block
+    // (accepted over-block; upstream gap filed as
     // cad0p/pi-steering-flags#11).
-    const target = getFlagValue(args, "-R") ?? getFlagValue(args, "--repo");
+    const target = getFlagValue(args, ["-R", "--repo"]);
     if (target === null || target === "") return false; // fail-closed
     // Slashless remote-name forms (`-R upstream`) are the fork→
     // upstream flow — release (the anchor now routes them; the old
@@ -105,9 +111,15 @@ export const ghRepoFlagBeforeSubcommand = {
 
 /**
  * The dynamic block reason for `gh-repo-flag-before-subcommand`:
- * echoes the subcommand (PR/issue) and the `-R`/`--repo` target AS
- * TYPED. Arg-layer word scan only (display, not flag parsing — no
- * regex over the raw string). Never throws — static fallback on
+ * echoes the subcommand (PR/issue) and the EFFECTIVE `-R`/`--repo`
+ * target AS TYPED — mirroring `getFlagValue`'s LAST-flag-wins scan so
+ * the redirect names what gh will actually target when both aliases
+ * occur (echoing an overridden earlier alias would misdirect the cd).
+ * Arg-layer word scan only (display, not flag parsing — no regex over
+ * the raw string): RIGHT→LEFT, at each position bare `-R`/`--repo`
+ * first (echo flag + next word), then glued forms (`--repo=…` /
+ * `-R…`, echo the whole word verbatim); the first match from the
+ * right wins regardless of form. Never throws — static fallback on
  * unparsable args (the evaluator's fail-safe would still land the
  * block verdict, but keep it clean).
  */
@@ -115,28 +127,30 @@ export function foreignRepoReason(ctx: PredicateContext): string {
   const words = ctx.input.args ?? [];
   let flag = "-R";
   let target: string | null = null;
-  let subIndex = -1; // index of the subcommand word (pr/issue)
-  for (let i = 0; i < words.length; i++) {
+  for (let i = words.length - 1; i >= 0; i--) {
     const t = words[i]?.text ?? "";
     if (t === "-R" || t === "--repo") {
       flag = t;
       target = words[i + 1]?.text ?? "";
-      subIndex = i + 2;
       break;
     }
     if (t.startsWith("--repo=") || t.startsWith("-R")) {
       // Glued form: the flag+value is ONE word — echo it verbatim
       // ("--repo=cad0p/x", "-Rcad0p/x").
       flag = t;
-      subIndex = i + 1;
       break;
     }
   }
-  // The subcommand is positionally determined (the word right after
-  // the flag+value) — scanning the whole command for /\bpr\b/ could
-  // mislabel an issue command whose title/subject mentions "pr"
-  // (or a target like `cad0p/pr-mirror`).
-  const sub = words[subIndex]?.text ?? "";
+  // The subcommand is the FIRST exact `pr`/`issue` TOKEN in the argv.
+  // Exact tokens only: the walker keeps quoted values as single words,
+  // so a subject like "fix pr bug" or a target like `cad0p/pr-mirror`
+  // can never match. (Positional detection relative to the flag+value
+  // broke with the right→left scan above: the winning alias may sit at
+  // the line's end, past any subcommand.)
+  const subWord = words.find(
+    (w) => (w?.text ?? "") === "pr" || (w?.text ?? "") === "issue",
+  );
+  const sub = subWord?.text ?? "";
   const what = sub === "pr" ? "PR" : "issue";
   // Space form: `-R <target>` / `--repo <target>`. Glued form: the
   // word IS the flag+value (`--repo=x/y`, `-Rx/y`) — echo verbatim.

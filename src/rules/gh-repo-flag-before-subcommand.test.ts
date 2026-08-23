@@ -235,6 +235,44 @@ describe("github plugin — gh-repo-flag-before-subcommand unless (basename matc
     });
     assert.equal(await ghRepoFlagBeforeSubcommand.unless!(ctx), true);
   });
+
+  it("BEHAVIOR DELTA (#34): cross-alias override — last alias wins", async () => {
+    // `gh -R <own> … --repo cad0p/other`: gh/cobra collapse repeated
+    // spellings of one logical flag to the LAST value, so the command
+    // targets `cad0p/other`. The old `??` composition let the
+    // FIRST-seen alias (`-R`, own repo) win → basename match → allow
+    // (wrong vs gh). Last-wins resolution sees the foreign override →
+    // block. This is THE regression pin issue #34 asks for.
+    const ctx = ctxWith(
+      "gh -R cad0p/pi-steering-github pr create --repo cad0p/other",
+      { remote: "https://github.com/cad0p/pi-steering-github.git" },
+    );
+    assert.equal(await ghRepoFlagBeforeSubcommand.unless!(ctx), false);
+  });
+
+  it("BEHAVIOR DELTA (#34): trailing valueless alias fail-closes", async () => {
+    // A trailing bare `-R` is the LAST occurrence across the aliases;
+    // last-wins getFlagValue returns null with NO fallback to the
+    // overridden earlier `--repo` value (real pflag errors on it
+    // anyway) — fail-closed block. Old code fell through `??` to the
+    // earlier valued alias and allowed.
+    const ctx = ctxWith("gh --repo cad0p/pi-steering-github pr merge -R", {
+      remote: "https://github.com/cad0p/pi-steering-github.git",
+    });
+    assert.equal(await ghRepoFlagBeforeSubcommand.unless!(ctx), false);
+  });
+
+  it("BEHAVIOR DELTA (#34): empty attached value as last occurrence fail-closes", async () => {
+    // `--repo=` (empty ATTACHED value, distinct from the space-form
+    // valueless case above) is the last occurrence → getFlagValue
+    // returns "" → fail-closed block. Old code's `-R` call won the
+    // `??` and took the basename path (allow for own repo). gh errors
+    // on an empty repo anyway — accepted over-block.
+    const ctx = ctxWith("gh -R cad0p/pi-steering-github pr create --repo=", {
+      remote: "https://github.com/cad0p/pi-steering-github.git",
+    });
+    assert.equal(await ghRepoFlagBeforeSubcommand.unless!(ctx), false);
+  });
 });
 
 describe("github plugin — gh-repo-flag-before-subcommand ReasonFn (dynamic)", () => {
@@ -288,6 +326,36 @@ describe("github plugin — gh-repo-flag-before-subcommand ReasonFn (dynamic)", 
     assert.equal(
       reason,
       "The issue you're targeting via -Rcad0p/x belongs to a foreign repo.\n" +
+        "REQUIREMENT: run a foreign subagent maintainer loop until good,\n" +
+        "then cd into the foreign repo and target it from there.",
+    );
+  });
+
+  it("cross-alias command echoes the EFFECTIVE (last) flag+target", () => {
+    // Right→left scan mirrors getFlagValue's LAST-flag-wins: the
+    // overridden early `-R cad0p/a` is NOT echoed — the redirect names
+    // what gh will actually target (`--repo cad0p/b`).
+    const reason = foreignRepoReason(
+      ctxWith("gh -R cad0p/a pr create --repo cad0p/b"),
+    );
+    assert.equal(
+      reason,
+      "The PR you're targeting via --repo cad0p/b belongs to a foreign repo.\n" +
+        "REQUIREMENT: run a foreign subagent maintainer loop until good,\n" +
+        "then cd into the foreign repo and target it from there.",
+    );
+  });
+
+  it("trailing glued empty value echoes the glued word verbatim", () => {
+    // First match from the right wins REGARDLESS of form: the glued
+    // `--repo=` at the line's end beats the earlier valued `-R` —
+    // consistent with the fail-closed block verdict for this command.
+    const reason = foreignRepoReason(
+      ctxWith("gh -R cad0p/a pr create --repo="),
+    );
+    assert.equal(
+      reason,
+      "The PR you're targeting via --repo= belongs to a foreign repo.\n" +
         "REQUIREMENT: run a foreign subagent maintainer loop until good,\n" +
         "then cd into the foreign repo and target it from there.",
     );
