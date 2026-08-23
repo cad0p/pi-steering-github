@@ -65,14 +65,19 @@ pnpm add @cad0p/pi-steering-github
 ```ts
 // .pi/steering/index.ts
 import { defineConfig } from "@cad0p/pi-steering";
+import { flagsPlugin } from "@cad0p/pi-steering-flags";
 import githubPlugin from "@cad0p/pi-steering-github";
 
 export default defineConfig({
-  plugins: [githubPlugin],
+  // REQUIRED: the merge rule's gate is fully declarative and composes
+  // two pi-steering-flags predicates (`not.infoOnly`,
+  // `requiresFlagValue`) — without flagsPlugin those keys throw
+  // UnknownPredicateError at evaluation time.
+  plugins: [flagsPlugin, githubPlugin],
 });
 ```
 
-Listing the plugin feeds its rule/predicate names into `defineConfig`'s type unions, so `disabledRules` typos fail at compile time.
+Listing the plugins feeds their rule/predicate names into `defineConfig`'s type unions, so `disabledRules` typos fail at compile time.
 
 ## Rules
 
@@ -164,7 +169,7 @@ Strict rules are still individually disableable at the config level:
 
 ```ts
 export default defineConfig({
-  plugins: [githubPlugin],
+  plugins: [flagsPlugin, githubPlugin], // flagsPlugin required — see Usage
   // Keep the issue-link policy but allow inline --body anywhere.
   disabledRules: ["pr-body-from-vault-file", "issue-body-from-vault-file"],
 });
