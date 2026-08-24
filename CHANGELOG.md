@@ -27,6 +27,7 @@ All notable changes to this project will be documented in this file.
 - Adopt token-level info-only carve-out (closes #24)
 - Src/ per-item layout (work-item-plugin structure) (closes #31)
 - *(rules)* Declarative merge gate + cross-alias last-wins repo target (closes #23, closes #34)
+- *(rules)* Extract foreignRepoTarget registered predicate, declarative repo target gate (closes #36)
 
 ### 📚 Documentation
 
