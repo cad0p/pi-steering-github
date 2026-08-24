@@ -68,11 +68,14 @@ describe("github plugin — pattern constants", () => {
 describe("github plugin — gh-repo-flag-before-subcommand (normalized form)", () => {
   it("routes gated subcommands with zero or one leading flag (both -R positions)", () => {
     // Flag-first position: sole leading flag(+value), then a gated
-    // subcommand.
+    // subcommand. Case-insensitive (`/i`): gh flags/subcommands are
+    // lowercase by convention, but the anchor must not silently
+    // un-anchor uppercase spellings.
     assert.equal(
       blocked(REPO_FLAG_ANCHOR, "gh -R cad0p/x pr create --title t"),
       true,
     );
+    assert.equal(blocked(REPO_FLAG_ANCHOR, "GH -R X/Y PR MERGE"), true);
     assert.equal(blocked(REPO_FLAG_ANCHOR, "gh -R cad0p/x pr new x"), true);
     assert.equal(blocked(REPO_FLAG_ANCHOR, "gh -R cad0p/x pr edit 46 x"), true);
     assert.equal(

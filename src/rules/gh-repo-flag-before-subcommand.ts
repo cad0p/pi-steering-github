@@ -52,7 +52,10 @@
  * (token-level walker argv underneath both leaves).
  *
  * Reason is a `ReasonFn` — the plugin's first dynamic reason: the
- * redirect text echoes the target and subcommand AS TYPED.
+ * redirect text renders from the RESOLVED `-R/--repo` target (the
+ * single source of truth shared with the predicate; unparsable
+ * targets get an honest fallback phrase — as-typed echo fidelity
+ * was deliberately dropped with the mirror scan it required).
  *
  * Strict — no override (schema default).
  */
