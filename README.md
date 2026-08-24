@@ -65,14 +65,19 @@ pnpm add @cad0p/pi-steering-github
 ```ts
 // .pi/steering/index.ts
 import { defineConfig } from "@cad0p/pi-steering";
+import { flagsPlugin } from "@cad0p/pi-steering-flags";
 import githubPlugin from "@cad0p/pi-steering-github";
 
 export default defineConfig({
-  plugins: [githubPlugin],
+  // REQUIRED: the merge rule's gate is fully declarative and composes
+  // two pi-steering-flags predicates (`not.infoOnly`,
+  // `requiresFlagValue`) — without flagsPlugin those keys throw
+  // UnknownPredicateError at evaluation time.
+  plugins: [flagsPlugin, githubPlugin],
 });
 ```
 
-Listing the plugin feeds its rule/predicate names into `defineConfig`'s type unions, so `disabledRules` typos fail at compile time.
+Listing the plugins feeds their rule/predicate names into `defineConfig`'s type unions, so `disabledRules` typos fail at compile time.
 
 ## Rules
 
@@ -80,7 +85,7 @@ Listing the plugin feeds its rule/predicate names into `defineConfig`'s type uni
 
 `gh -R x/y pr create|new|edit|merge` and `gh -R x/y issue create|edit` target a **foreign repo** and are blocked with a redirect: run a foreign subagent maintainer loop until good, then cd into the foreign repo and target it from there. This is the ENTRY step of the foreign flow — the rule sits FIRST in the roster so the redirect is the first thing the agent meets (its `^gh\s+-…` router anchor is disjoint from the other rules' `^gh\s+(?:pr|issue|repo)` anchors, so first-match routing is unaffected).
 
-All four typed forms are covered — `-R x/y`, `--repo x/y`, `--repo=x/y`, `-Rx/y` — plus any other flag-first form (`-v`, `--hostname`) which the router releases (not repo-targeting). The reason echoes the subcommand and the flag+target AS TYPED:
+All four typed forms are covered — `-R x/y`, `--repo x/y`, `--repo=x/y`, `-Rx/y` — plus any other flag-first form (`-v`, `--hostname`) which the router releases (not repo-targeting). Target resolution is **last-wins across the `-R`/`--repo` aliases**, matching gh/cobra (repeated spellings of one logical flag collapse to their final value): when both aliases occur, the LAST occurrence is the effective target, and a trailing valueless alias or an empty attached value as the last occurrence fails closed instead of falling back to the overridden earlier alias. The reason echoes the subcommand and the EFFECTIVE flag+target AS TYPED — the echo scans right→left like the resolution (bare aliases, `--repo=` glued, and glued short forms that look like slashful targets), so the redirect names what gh will actually target:
 
 ```
 The PR you're targeting via -R cad0p/x belongs to a foreign repo.
@@ -89,7 +94,7 @@ then cd into the foreign repo and target it from there.
 ```
 
 - **Fork→upstream flow is allowed**: when the `-R` target's basename equals the cwd repo's basename (origin URL basename, cwd-folder fallback — the existing `repoName` helper), the command passes — `gh -R upstream/foo pr create` from inside the `me/foo` clone is the most common legit `-R` use. Cost accepted: `-R <own-repo> pr merge` from inside the repo is indistinguishable and slips through — these gates are heuristic discipline, not security. For fork workflows, `gh repo set-default upstream` makes gh target upstream by default (no `-R` needed).
-- **Fail-closed**: unknown cwd / unresolvable repo / unparsable target → blocked.
+- **Fail-closed**: unknown cwd / unresolvable repo / unparsable target / a valueless-or-empty last alias occurrence → blocked.
 - **Read-only `--help`/`-h` never blocks** — token-level carve-out in the rule's `unless` via `hasFlag` from `@cad0p/pi-steering-flags` (a help token inside a quoted value can't falsely exempt). The rule's flag parsing (target extraction, help carve-out) runs entirely on the walker-parsed argv via the flags helpers — the pattern is a pure router, no regex flag parsing.
 - **Glued short form `-Rcad0p/x`**: the flags helpers can't see it (walker keeps it as one word) → target unparsable → fail-closed block, even for the own-repo case. Accepted over-block; upstream gap filed as cad0p/pi-steering-flags#11.
 - **`repo create|new` is excluded by design**: nothing to cd into — the target is the positional argument (`gh repo create owner/name` works from any cwd, and the seed rule gates the actual create form).
@@ -112,7 +117,7 @@ FORM + vault-path check — the substitution must be the pinned form AND the fil
 
 ### `pr-merge-needs-closing-keywords`
 
-`gh pr merge` must carry a closing keyword + `#N` in the `--subject` value (commit subject) — short `-t` form, `--flag=value` forms. GitHub scans the whole squash commit message for closing keywords, so the commit subject alone closes the issues; the commit body is optional at merge. Read-only `--help`, `--version`, and GitHub's additive `-h` never block, using the token-level `isInfoOnly(args, ["-h"])` helper inside `when.condition`; attached forms (`--help=value`, `--version=1`, `-h=value`) are included, while `-v` remains gated. Because the helper examines walker-parsed argv, quoted values such as `--subject "see --help"` or `"see --version"` can't falsely exempt. An exact quoted value equal to an info token (for example `--subject "--help"`) is indistinguishable from a bare flag after quote removal and is an accepted limitation.
+`gh pr merge` must carry a closing keyword + `#N` in the `--subject` value (commit subject) — short `-t` form, `--flag=value` forms. GitHub scans the whole squash commit message for closing keywords, so the commit subject alone closes the issues; the commit body is optional at merge. The gate is **fully declarative** — zero condition code: `when.not.infoOnly(["-h"])` exempts read-only `--help`, `--version`, and GitHub's additive `-h` (attached forms `--help=value`, `--version=1`, `-h=value` included; `-v` stays gated), and `when.requiresFlagValue({ flags: ["--subject", "-t"], matches: ISSUE_REF })` enforces the subject check with gh/cobra last-flag-wins semantics across the two aliases — absent, valueless, or non-matching values block. Both leaves are `@cad0p/pi-steering-flags` predicates over walker-parsed argv, so quoted values such as `--subject "see --help"` can't falsely exempt. An exact quoted value equal to an info token (for example `--subject "--help"`) is indistinguishable from a bare flag after quote removal and is an accepted limitation.
 
 ### `issue-body-from-vault-file`
 
@@ -164,7 +169,7 @@ Strict rules are still individually disableable at the config level:
 
 ```ts
 export default defineConfig({
-  plugins: [githubPlugin],
+  plugins: [flagsPlugin, githubPlugin], // flagsPlugin required — see Usage
   // Keep the issue-link policy but allow inline --body anywhere.
   disabledRules: ["pr-body-from-vault-file", "issue-body-from-vault-file"],
 });

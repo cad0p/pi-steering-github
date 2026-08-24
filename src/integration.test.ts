@@ -37,11 +37,16 @@ import {
   loadHarness,
   mockExtensionContext,
 } from "@cad0p/pi-steering/testing";
+import { flagsPlugin } from "@cad0p/pi-steering-flags";
 import type { ExecResult } from "@earendil-works/pi-coding-agent";
 import { BODY_STRIP } from "./helpers/body-strip.ts";
 import { githubPlugin } from "./index.ts";
 
-const config = defineConfig({ plugins: [githubPlugin] });
+// flagsPlugin supplies the declarative when leaves
+// (`not.infoOnly`, `requiresFlagValue`) that pr-merge-needs-closing-
+// keywords composes — without it those keys hit the evaluator's
+// UnknownPredicateError at evaluation time.
+const config = defineConfig({ plugins: [flagsPlugin, githubPlugin] });
 
 /** Fixture dirs created per test, cleaned up after. */
 const fixtures: string[] = [];
@@ -639,6 +644,20 @@ describe("github plugin — PR rules (issue-link + vault body-file policy)", () 
     const { block, rule } = await evaluateBash(
       makeFixtureDir(),
       `gh pr merge --squash --subject "fix: x (closes #12, closes #15)"`,
+      host,
+    );
+    assert.equal(block, false, `expected allow, got block by ${rule}`);
+  });
+
+  it("BEHAVIOR DELTA (#23-a): attached short form -t=<ref> now allowed", async () => {
+    // pflag-correct flip: `-t=<value>` is valid attached-value syntax.
+    // The old hand-rolled scan only knew bare `-t` and the `--subject=`
+    // prefix, so `-t=` was invisible → subject null → BLOCK. The
+    // requiresFlagValue predicate matches the `${flag}=` prefix per
+    // alias → value found → ALLOW.
+    const { block, rule } = await evaluateBash(
+      makeFixtureDir(),
+      `gh pr merge --squash -t="feat: x (closes #12)"`,
       host,
     );
     assert.equal(block, false, `expected allow, got block by ${rule}`);

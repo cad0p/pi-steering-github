@@ -61,9 +61,10 @@ export const PR_CREATE_ANCHOR = /^gh\s+pr\s+(?:create|new)\b/i;
 /**
  * `pr-merge-needs-closing-keywords` anchor: pr merge only. Fires
  * unless the command carries a closing-keyword ref in the `--subject`
- * value (short `-t` form, `--flag=value` forms) — the info-only
- * carve-out and subject check both live in `when.condition` against
- * the walker-parsed argv. `isInfoOnly` recognizes its safe default
+ * value (short `-t` form, `--flag=value` forms) — the gate is fully
+ * declarative on the walker-parsed argv (`not.infoOnly` +
+ * `requiresFlagValue` predicates from `@cad0p/pi-steering-flags`;
+ * zero condition code). `infoOnly` recognizes its safe default
  * `--help`/`--version` tokens plus GitHub's additive `-h`; attached
  * forms are included, while quoted values such as `--subject "see
  * --help"` remain real merge subjects. An exact quoted info token is
