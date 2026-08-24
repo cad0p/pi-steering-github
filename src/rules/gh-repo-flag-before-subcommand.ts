@@ -13,21 +13,39 @@
  *
  * Fires on `pr create|new|edit|merge` and `issue create|edit` only
  * (`repo create|new` is excluded by design — nothing to cd into, the
- * target is the positional argument; read-only forms stay allowed:
- * `pr view`, `issue list`, `--help`/`-h`). The anchor is a pure
- * router: it also routes non-repo flags (`-v`, `--hostname`) and
- * slashless `-R upstream` — the `unless` releases those (not
- * repo-targeting / fork remote-name form).
+ * target is the positional argument; read-only forms stay allowed).
+ * The anchor is a pure router: it also routes non-repo flags (`-v`,
+ * `--hostname`) and slashless `-R upstream` — the
+ * `foreignRepoTarget` predicate releases those (not repo-targeting /
+ * fork remote-name form).
  *
- * `unless` — allow when the `-R` target's basename equals the cwd
- * repo's basename (`repoName(ctx, ctx.cwd)` — origin URL basename,
- * cwd-folder fallback): the fork→upstream contribution flow
- * (`gh -R upstream/foo pr create` from the `me/foo` clone) is the
- * most common LEGIT `-R` use and must stay allowed. Cost accepted:
- * `-R <own-repo> pr merge` from inside the repo is indistinguishable
- * and slips through — heuristic discipline, not security. Fail-
- * closed: unknown cwd / unresolvable repo / unparsable target →
- * block.
+ * Fully declarative gate — zero condition code (issue #36). Two
+ * leaves compose as an AND of independent registered predicates:
+ *
+ * - `not.infoOnly({ extraFlags: ["-h"] })` exempts read-only
+ *   introspection: the flags plugin's `--help`/`--version` defaults
+ *   PLUS GitHub's additive `-h` (token-level, quote-aware — quoted
+ *   values can't falsely exempt). Accepted exposure: a gated
+ *   invocation carrying `--version` (bare or attached) is now
+ *   ALLOWED — gh errors on it for pr/issue subcommands, so nothing
+ *   real can happen; `-v` is NOT in the default set and stays
+ *   gated.
+ * - `foreignRepoTarget: true` — this package's registered
+ *   predicate: blocks when the effective `-R`/`--repo` target is a
+ *   FOREIGN repo. The basename compare is hardcoded policy (#19):
+ *   basename equality allows the fork→upstream contribution flow
+ *   (`gh -R upstream/foo pr create` from the `me/foo` clone); cost
+ *   accepted: `-R <own-repo> pr merge` from inside the repo is
+ *   indistinguishable and slips through — heuristic discipline, not
+ *   security. Fail-closed: unknown cwd / unresolvable repo /
+ *   unparsable target → block.
+ *
+ * AND-of-leaves order-independence (confirmed during #23):
+ * help/version invocations short-circuit ALLOW via the not-leaf
+ * without consulting the predicate — byte-equivalent to the old
+ * early-return ordering. A `--help` inside a QUOTED VALUE
+ * (`--subject "see --help"`) does NOT exempt a real gated command
+ * (token-level walker argv underneath both leaves).
  *
  * Reason is a `ReasonFn` — the plugin's first dynamic reason: the
  * redirect text echoes the target and subcommand AS TYPED.
@@ -36,75 +54,16 @@
  */
 
 import type { PredicateContext, Rule } from "@cad0p/pi-steering";
-import { getFlagValue, hasFlag } from "@cad0p/pi-steering-flags";
 import { REPO_FLAG_ANCHOR } from "../helpers/patterns.ts";
-import { repoName } from "../helpers/repo-name.ts";
 
 export const ghRepoFlagBeforeSubcommand = {
   name: "gh-repo-flag-before-subcommand",
   tool: "bash",
   field: "command",
   pattern: REPO_FLAG_ANCHOR,
-  unless: async (ctx: PredicateContext) => {
-    const args = ctx.input.args ?? [];
-    // Help is read-only introspection — never a foreign redirect.
-    // Keep this independent -R rule on hasFlag with the exact
-    // {--help, -h} set (same token-level semantics as isInfoOnly,
-    // but deliberately NOT its extra --version default: gh pr/issue
-    // subcommands treat --version as an unknown-flag error, never
-    // read-only introspection — see the adopt-flags plan's D2). A
-    // `--help` inside a QUOTED VALUE (`--subject "see --help"`)
-    // does NOT exempt a real gated command.
-    if (hasFlag(args, "--help") || hasFlag(args, "-h")) return true;
-    // The anchor routes ANY first flag token (pure router). Release
-    // commands whose FIRST flag token is NOT the repo-flag family
-    // (`-v`, `--hostname`, …) — they are not repo-targeting. (Scan
-    // for the first `-`-prefixed token; the walker's `input.args`
-    // excludes the basename `gh`, but the unit-test helper includes
-    // it — scanning is position-robust either way.)
-    let firstFlag: string | null = null;
-    for (const w of args) {
-      const t = w?.text ?? "";
-      if (t.startsWith("-") && t !== "-") {
-        firstFlag = t;
-        break;
-      }
-    }
-    const isRepoFlag =
-      firstFlag === "-R" ||
-      firstFlag === "--repo" ||
-      (firstFlag !== null &&
-        (firstFlag.startsWith("-R") || firstFlag.startsWith("--repo=")));
-    if (!isRepoFlag) return true; // not a repo-targeting command
-    // The `-R`/`--repo` target, via `@cad0p/pi-steering-flags`
-    // (arg layer, quote-aware, `--flag=value` + `--flag value` forms).
-    // The alias SET makes the resolution LAST-wins across `-R`/`--repo`
-    // (gh/cobra collapse repeated spellings of one logical flag to the
-    // final value) — the old `??` composition let the FIRST-seen alias
-    // win and miss a cross-alias override (issue #34). A trailing
-    // valueless alias or an empty attached value as the last occurrence
-    // wins and fail-closes (null / "" → block below). Glued short form
-    // `-Rcad0p/x` is INVISIBLE to the helpers (the walker keeps it as
-    // one word) — `getFlagValue` returns null → fail-closed block
-    // (accepted over-block; upstream gap filed as
-    // cad0p/pi-steering-flags#11).
-    const target = getFlagValue(args, ["-R", "--repo"]);
-    if (target === null || target === "") return false; // fail-closed
-    // Slashless remote-name forms (`-R upstream`) are the fork→
-    // upstream flow — release (the anchor now routes them; the old
-    // anchor never did). A `/`-containing target is required to be a
-    // foreign-owner/repo redirect.
-    if (!target.includes("/")) return true;
-    const cwd = ctx.cwd;
-    if (typeof cwd !== "string" || cwd === "unknown") return false;
-    const repo = await repoName(ctx, cwd);
-    // `repoName` falls back to the cwd folder name, which for the
-    // walker-unknown sentinel is the literal string "unknown" (NOT
-    // null) — treat it as no-match (block), like an unresolvable
-    // repo.
-    if (repo === null || repo === "unknown") return false;
-    const targetBase = target.slice(target.lastIndexOf("/") + 1);
-    return targetBase === repo;
+  when: {
+    not: { infoOnly: { extraFlags: ["-h"] } },
+    foreignRepoTarget: true,
   },
   reason: (ctx: PredicateContext) => foreignRepoReason(ctx),
 } as const satisfies Rule;
