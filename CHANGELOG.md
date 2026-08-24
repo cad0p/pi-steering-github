@@ -12,6 +12,7 @@ All notable changes to this project will be documented in this file.
 
 - Gh repo create must seed the repo — bootstraps go through PRs (closes #7)
 - Strip frontmatter and heading from vault body files on gh upload (closes #3)
+- Glue-aware -R target resolution — drop the glued-short over-block (closes #27)
 
 ### 🐛 Bug Fixes
 
