@@ -66,7 +66,64 @@ describe("github plugin — pattern constants", () => {
 });
 
 describe("github plugin — gh-repo-flag-before-subcommand (normalized form)", () => {
-  it("does not route read-only forms, excluded subcommands, or -R after the subcommand", () => {
+  it("routes gated subcommands with zero or one leading flag (both -R positions)", () => {
+    // Flag-first position: sole leading flag(+value), then a gated
+    // subcommand. Case-insensitive (`/i`): gh flags/subcommands are
+    // lowercase by convention, but the anchor must not silently
+    // un-anchor uppercase spellings.
+    assert.equal(
+      blocked(REPO_FLAG_ANCHOR, "gh -R cad0p/x pr create --title t"),
+      true,
+    );
+    assert.equal(blocked(REPO_FLAG_ANCHOR, "GH -R X/Y PR MERGE"), true);
+    assert.equal(blocked(REPO_FLAG_ANCHOR, "gh -R cad0p/x pr new x"), true);
+    assert.equal(blocked(REPO_FLAG_ANCHOR, "gh -R cad0p/x pr edit 46 x"), true);
+    assert.equal(
+      blocked(REPO_FLAG_ANCHOR, "gh -R cad0p/x pr merge --squash"),
+      true,
+    );
+    assert.equal(
+      blocked(REPO_FLAG_ANCHOR, "gh --repo cad0p/x pr create --title t"),
+      true,
+    );
+    assert.equal(
+      blocked(REPO_FLAG_ANCHOR, "gh --repo=cad0p/x issue create --title t"),
+      true,
+    );
+    assert.equal(blocked(REPO_FLAG_ANCHOR, "gh -Rcad0p/x issue edit 3"), true);
+    assert.equal(
+      blocked(REPO_FLAG_ANCHOR, "gh -R ghe.example.com/org/repo pr edit 46"),
+      true,
+    );
+    // MUST-BLOCK repro pin: the EXACT issue #19 under-block repro
+    // (keyword in --subject). A roster reorder can't silently
+    // re-open the hole: this line pins that the new rule fires
+    // regardless of keywords.
+    assert.equal(
+      blocked(
+        REPO_FLAG_ANCHOR,
+        "gh -R cad0p/x pr merge --squash --subject fix: x (closes #12)",
+      ),
+      true,
+    );
+    // Subcommand-first position (#39): zero leading flags — the
+    // optional flag group is skipped and the gated subcommand routes.
+    // This IS the issue: `gh pr create -R x/y …` escaped the foreign
+    // gate before the widening.
+    assert.equal(blocked(REPO_FLAG_ANCHOR, "gh pr merge --squash"), true);
+    assert.equal(
+      blocked(REPO_FLAG_ANCHOR, "gh pr create -R cad0p/x --title t"),
+      true,
+    );
+    assert.equal(
+      blocked(REPO_FLAG_ANCHOR, "gh issue edit 3 --repo=cad0p/x"),
+      true,
+    );
+    // One leading flag WITHOUT a trailing value token still routes.
+    assert.equal(blocked(REPO_FLAG_ANCHOR, "gh -v pr merge --squash"), true);
+  });
+
+  it("does not route read-only forms, excluded subcommands, echo prefixes, or two-leading-flag shapes", () => {
     assert.equal(blocked(REPO_FLAG_ANCHOR, "gh -R cad0p/x pr view 12"), false);
     assert.equal(blocked(REPO_FLAG_ANCHOR, "gh -R cad0p/x issue list"), false);
     assert.equal(
@@ -82,10 +139,6 @@ describe("github plugin — gh-repo-flag-before-subcommand (normalized form)", (
       false,
     );
     assert.equal(
-      blocked(REPO_FLAG_ANCHOR, "gh pr create -R cad0p/x --title t"),
-      false,
-    );
-    assert.equal(
       blocked(REPO_FLAG_ANCHOR, "echo gh -R cad0p/x pr create --title t"),
       false,
     );
@@ -93,13 +146,20 @@ describe("github plugin — gh-repo-flag-before-subcommand (normalized form)", (
       blocked(REPO_FLAG_ANCHOR, "gh -R cad0p/x repo clone x"),
       false,
     );
+    // Documented boundary: TWO leading flags stay unrouted (the
+    // optional group covers zero or exactly one flag+value pair).
+    assert.equal(
+      blocked(REPO_FLAG_ANCHOR, "gh --hostname h -R cad0p/x pr merge"),
+      false,
+    );
   });
 
-  it("the anchor is a pure router: --help/-h and non-repo flags still route, the UNLESS decides", () => {
-    // The anchor does NOT decide help — the token-level `unless`
-    // carve-out does (so a `--help` inside a quoted value never
+  it("the anchor is a shape router: help/-h and non-repo leading flags still route, the predicate decides repo-targeting", () => {
+    // The anchor does NOT decide help or flag identity — the
+    // token-level `not.infoOnly` carve-out and the `foreignRepoTarget`
+    // presence check do (so a `--help` inside a quoted value never
     // falsely exempts). These route to the rule and are allowed by
-    // the `unless` fn.
+    // the composed leaves.
     assert.equal(
       blocked(REPO_FLAG_ANCHOR, "gh -R cad0p/x pr merge --help"),
       true,

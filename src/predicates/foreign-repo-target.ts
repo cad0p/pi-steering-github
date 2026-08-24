@@ -4,40 +4,48 @@
 /**
  * `when.foreignRepoTarget` — the `-R`/`--repo` foreign-target gate
  * backing `gh-repo-flag-before-subcommand`. True (rule fires →
- * BLOCK) when a flag-first `gh -R/--repo …` invocation targets a
- * FOREIGN repository; false releases the command.
+ * BLOCK) when the invocation carries an effective `-R/--repo`
+ * targeting a FOREIGN repository; false releases the command.
  *
  * Extracted from the rule's former inline `unless` closure (issue
  * #36) and return-INVERTED: the closure returned true to RELEASE
  * (allow); a registered predicate returns true to FIRE (block).
- * The five jobs keep their order:
+ * Presence-based since #39: the router routes gated subcommand
+ * shapes in EITHER flag position, and this gate keys on whether the
+ * invocation CARRIES `-R/--repo` — not on where the flag sits —
+ * collapsing every routed command into one of three states:
  *
- *   1. Router-release: the anchor routes ANY first `-`-prefixed
- *      token; commands whose FIRST flag token is NOT the repo-flag
- *      family (`-R`, `--repo`, glued `-R…`, `--repo=…`) are not
- *      repo-targeting (`-v`, `--hostname`, …) → release.
- *   2. Target resolution via `getFlagValue` with
- *      `{ gluedShorts: ["R"] }` (`@cad0p/pi-steering-flags`, arg
- *      layer, quote-aware): LAST-wins across the `-R`/`--repo` alias
- *      set (gh/cobra collapse repeated spellings of one logical flag
- *      to the final value — issue #34), resolving bare `-R`, attached
- *      `--repo=`/`-R=`, AND glued short forms like `-Rcad0p/x`
- *      (upstream cad0p/pi-steering-flags#11 shipped the opt-in;
- *      per-position precedence exact > attached > glued). A trailing
- *      valueless alias or an empty attached value as the last
- *      occurrence wins and fail-closes in step 3.
- *   3. Unparsable target (`null` / `""`) → BLOCK. Only trailing-
- *      valueless aliases and empty attached values remain unparsable
- *      now that glued forms resolve.
- *   4. Slashless target (`-R upstream`, remote-name form) → release:
- *      no `/` means it cannot be a foreign-owner/repo redirect; the
- *      fork→upstream flow passes through unchanged.
- *   5. Basename compare against the cwd repo (`repoName` — origin
- *      URL basename, cwd-folder fallback): basename EQUALITY is
- *      allowed (fork→upstream tolerance, issue #19 — hardcoded THE
- *      policy, no config knob), anything else BLOCKS. Fail-closed:
- *      walker-unknown cwd / unresolvable repo ("unknown" sentinel or
- *      null) → BLOCK.
+ *   1. ABSENT (`hasFlag` sees no `-R`/`--repo` token anywhere in
+ *      the argv — space, attached `=`, or glued forms included) →
+ *      not repo-targeting → release. The command falls through to
+ *      the per-subcommand policies (vault bodies, closing keywords).
+ *   2. PRESENT-UNPARSABLE (`getFlagValue` → null / "") → BLOCK
+ *      (fail-closed). Only trailing-valueless aliases and empty
+ *      attached values remain unparsable now that glued forms
+ *      resolve. This absent-vs-unparsable distinction is what makes
+ *      broadened (presence-keyed) routing safe: a routed command
+ *      with NO repo flag isn't held up, and one carrying an
+ *      unresolvable repo flag can't slip through on a technicality.
+ *   3. PRESENT-PARSABLE: slashless remote-name forms (`-R upstream`)
+ *      release (no `/` cannot be a foreign-owner/repo redirect; the
+ *      fork→upstream flow passes unchanged); otherwise basename
+ *      compare against the cwd repo (`repoName` — origin URL
+ *      basename, cwd-folder fallback): basename EQUALITY is allowed
+ *      (fork→upstream tolerance, issue #19 — hardcoded THE policy,
+ *      no config knob), anything else BLOCKS. Fail-closed:
+ *      walker-unknown cwd / unresolvable repo ("unknown" sentinel
+ *      or null) → BLOCK.
+ *
+ * Target resolution (states 2–3) via `getFlagValue` with
+ * `{ gluedShorts: ["R"] }` (`@cad0p/pi-steering-flags`, arg layer,
+ * quote-aware): LAST-wins across the `-R`/`--repo` alias set (gh/
+ * cobra collapse repeated spellings of one logical flag to the final
+ * value — issue #34), resolving bare `-R`, attached `--repo=`/`-R=`,
+ * AND glued short forms like `-Rcad0p/x` (upstream
+ * cad0p/pi-steering-flags#11 shipped the opt-in; per-position
+ * precedence exact > attached > glued). A trailing valueless alias
+ * or an empty attached value as the last occurrence wins and lands
+ * in state 2.
  *
  * Step 0 comes before all of that: bare `false` NEVER fires.
  *
@@ -50,7 +58,7 @@
  */
 
 import type { PredicateContext, PredicateHandler } from "@cad0p/pi-steering";
-import { getFlagValue } from "@cad0p/pi-steering-flags";
+import { getFlagValue, hasFlag } from "@cad0p/pi-steering-flags";
 import { repoName } from "../helpers/repo-name.ts";
 
 /**
@@ -66,7 +74,7 @@ export type ForeignRepoTargetArgs = Record<string, never>;
 
 /**
  * `foreignRepoTarget` — true (BLOCK) when the effective `-R`/`--repo`
- * target is a foreign repository; false releases router-released,
+ * target is a foreign repository; false releases repo-flag-ABSENT,
  * slashless, and fork→upstream commands. Fail-closed: unparsable
  * target, walker-unknown cwd, unresolvable repo → true.
  */
@@ -80,26 +88,23 @@ export const foreignRepoTarget: PredicateHandler<
   if (args === false) return false;
 
   const words = ctx.input.args ?? [];
-  // Step 1 — router-release. The anchor routes ANY first flag token
-  // (pure router). Release commands whose FIRST flag token is NOT
-  // the repo-flag family (`-v`, `--hostname`, …) — they are not
-  // repo-targeting. (Scan for the first `-`-prefixed token; the
+  // Step 1 — PRESENCE gate (#39). Absent (`hasFlag` sees no
+  // `-R`/`--repo` token anywhere — space, attached, or glued forms)
+  // → not repo-targeting → release; evaluation falls through to the
+  // per-subcommand rules. Replaces the #36-era first-flag-token
+  // SHAPE check: keying on presence (the flags#21-widened `hasFlag`)
+  // closes the hole where subcommand-first mutations (`gh pr merge
+  // --repo=cad0p/foreign …`) escaped the policy entirely while their
+  // flag-first spelling twins were blocked. (Position-robust: the
   // walker's `input.args` excludes the basename `gh`, but unit-test
-  // helpers include it — scanning is position-robust either way.)
-  let firstFlag: string | null = null;
-  for (const w of words) {
-    const t = w?.text ?? "";
-    if (t.startsWith("-") && t !== "-") {
-      firstFlag = t;
-      break;
-    }
+  // helpers include it.)
+  if (
+    !hasFlag(words, ["-R", "--repo"], {
+      gluedShorts: ["R"],
+    })
+  ) {
+    return false;
   }
-  const isRepoFlag =
-    firstFlag === "-R" ||
-    firstFlag === "--repo" ||
-    (firstFlag !== null &&
-      (firstFlag.startsWith("-R") || firstFlag.startsWith("--repo=")));
-  if (!isRepoFlag) return false; // not a repo-targeting command
 
   // Step 2 — the `-R`/`--repo` target, via `@cad0p/pi-steering-flags`
   // (arg layer, quote-aware, `--flag=value` + `--flag value` + glued

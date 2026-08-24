@@ -38,10 +38,12 @@
  *                                      carry a seed flag; a bare
  *                                      create births an EMPTY repo.
  *
- *   - `gh-repo-flag-before-subcommand` — flag-first `gh -R x/y
- *                                      pr|issue …` targets a FOREIGN
- *                                      repo — redirect (foreign
- *                                      subagent maintainer loop).
+ *   - `gh-repo-flag-before-subcommand` — an invocation carrying
+ *                                      `-R x/y` into a gated
+ *                                      `pr|issue …` mutation targets
+ *                                      a FOREIGN repo — redirect
+ *                                      (foreign subagent maintainer
+ *                                      loop).
  *
  * See this package's README for usage examples and the per-rule
  * rationale, and the pi-steering README "Writing plugins" section for
@@ -84,10 +86,11 @@ declare global {
      */
     missingVaultBodyFile: PredicateShape<{ section: "prs" | "issues" }>;
     /**
-     * `when.foreignRepoTarget` — true (rule BLOCKS) when a flag-first
-     * `gh -R/--repo …` invocation targets a FOREIGN repository:
-     * the effective `-R`/`--repo` target's basename differs from
-     * the cwd repo's basename. Backs
+     * `when.foreignRepoTarget` — true (rule BLOCKS) when the
+     * invocation carries an effective `-R/--repo` targeting a
+     * FOREIGN repository (#39: PRESENCE of the flag, not its
+     * position): the effective `-R`/`--repo` target's basename
+     * differs from the cwd repo's basename. Backs
      * `gh-repo-flag-before-subcommand`.
      *
      * Fail-closed doctrine: an unparsable target (now only a
@@ -95,8 +98,9 @@ declare global {
      * forms resolve via `{ gluedShorts: ["R"] }`, upstream
      * cad0p/pi-steering-flags#11), a walker-unknown cwd, or an
      * unresolvable repo all BLOCK.
-     * Released without consulting any knob: non-repo first flags
-     * (`-v`, `--hostname`), and slashless remote-name forms (`-R
+     * Released without consulting any knob: invocations carrying NO
+     * `-R`/`--repo` token anywhere (they fall through to the
+     * per-subcommand rules), and slashless remote-name forms (`-R
      * upstream`).
      *
      * Basename policy = fork→upstream tolerance (#19), hardcoded —

@@ -877,4 +877,42 @@ describe("github plugin — gh-repo-flag-before-subcommand (-R foreign-target ga
     assert.equal(block, true, "expected block");
     assert.equal(rule, "gh-repo-flag-before-subcommand");
   });
+
+  it("BEHAVIOR DELTA (#39): subcommand-first foreign merge now blocks (was released)", async () => {
+    // The #39 class: `--repo=` after the subcommand used to escape
+    // the gate entirely (flag-first-only anchor). Now routed and
+    // blocked with the redirect.
+    const { block, rule } = await evaluateBash(
+      makeFixtureDir(),
+      "gh pr merge --repo=cad0p/other-repo --squash",
+    );
+    assert.equal(block, true, "expected block");
+    assert.equal(rule, "gh-repo-flag-before-subcommand");
+  });
+
+  it("fall-through: no-flag mutations reach the per-subcommand rules", async () => {
+    // `gh pr merge --squash` ROUTES the foreign gate first since #39
+    // (zero leading flags) but carries NO repo flag → predicate
+    // releases → the closing-keywords rule fires. Asserting the OTHER
+    // rule's name proves release-fall-through end-to-end.
+    const { block, rule } = await evaluateBash(
+      makeFixtureDir(),
+      "gh pr merge --squash",
+    );
+    assert.equal(block, true, "expected block");
+    assert.equal(rule, "pr-merge-needs-closing-keywords");
+  });
+
+  it("masking: a foreign target masks the closing-keywords allowance until cd", async () => {
+    // The --subject carries a VALID closing keyword — the merge rule
+    // alone would allow this command — but the foreign redirect fires
+    // first (first-fires-wins) and masks it. Per-subcommand policies
+    // apply naturally after cd into the foreign repo.
+    const { block, rule } = await evaluateBash(
+      makeFixtureDir(),
+      'gh pr merge --repo=cad0p/other-repo --squash --subject "feat: x (closes #12)"',
+    );
+    assert.equal(block, true, "expected block");
+    assert.equal(rule, "gh-repo-flag-before-subcommand");
+  });
 });

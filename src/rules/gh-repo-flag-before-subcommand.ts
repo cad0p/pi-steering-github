@@ -2,22 +2,26 @@
 // Part of pi-steering-github.
 
 /**
- * `gh-repo-flag-before-subcommand` — `gh -R x/y pr|issue …` targets
- * a FOREIGN repo and must be redirected to the foreign repo's own
- * config: run a foreign subagent maintainer loop until good, then cd
- * into the foreign repo and target it from there. This is the ENTRY
- * step of the foreign flow — FIRST in the roster (pedagogical; the
- * `^gh\s+(?:-R|--repo)` anchor is disjoint from the other rules'
- * `^gh\s+(?:pr|issue|repo)` anchors, so first-match routing is
- * unaffected).
+ * `gh-repo-flag-before-subcommand` — a gated `pr|issue …` mutation
+ * carrying `-R/--repo` targets a FOREIGN repo and must be redirected
+ * to the foreign repo's own config: run a foreign subagent
+ * maintainer loop until good, then cd into the foreign repo and
+ * target it from there. This is the ENTRY step of the foreign flow —
+ * FIRST in the roster: its router anchor OVERLAPS the pr/issue
+ * body/create/merge anchors (it routes gated subcommands with zero
+ * or one leading flag — both `-R` positions, #39), so correctness
+ * rests on the evaluator's first-firing-rule-wins ordering plus
+ * RELEASE FALL-THROUGH — the `foreignRepoTarget` predicate releases
+ * every command without a foreign target and the per-subcommand
+ * rules evaluate normally — not on anchor disjointness.
  *
  * Fires on `pr create|new|edit|merge` and `issue create|edit` only
  * (`repo create|new` is excluded by design — nothing to cd into, the
  * target is the positional argument; read-only forms stay allowed).
- * The anchor is a pure router: it also routes non-repo flags (`-v`,
- * `--hostname`) and slashless `-R upstream` — the
- * `foreignRepoTarget` predicate releases those (not repo-targeting /
- * fork remote-name form).
+ * The anchor is a shape router; repo-targeting is decided by
+ * PRESENCE of `-R/--repo` (#39): absent → release (fall-through);
+ * present-but-unparsable → fail-closed block; slashless `-R upstream`
+ * → release (fork remote-name form).
  *
  * Fully declarative gate — zero condition code (issue #36). Two
  * leaves compose as an AND of independent registered predicates:
@@ -48,12 +52,16 @@
  * (token-level walker argv underneath both leaves).
  *
  * Reason is a `ReasonFn` — the plugin's first dynamic reason: the
- * redirect text echoes the target and subcommand AS TYPED.
+ * redirect text renders from the RESOLVED `-R/--repo` target (the
+ * single source of truth shared with the predicate; unparsable
+ * targets get an honest fallback phrase — as-typed echo fidelity
+ * was deliberately dropped with the mirror scan it required).
  *
  * Strict — no override (schema default).
  */
 
 import type { PredicateContext, Rule } from "@cad0p/pi-steering";
+import { getFlagValue } from "@cad0p/pi-steering-flags";
 import { REPO_FLAG_ANCHOR } from "../helpers/patterns.ts";
 
 export const ghRepoFlagBeforeSubcommand = {
@@ -70,75 +78,37 @@ export const ghRepoFlagBeforeSubcommand = {
 
 /**
  * The dynamic block reason for `gh-repo-flag-before-subcommand`:
- * echoes the subcommand (PR/issue) and the EFFECTIVE `-R`/`--repo`
- * target AS TYPED — mirroring `getFlagValue`'s LAST-flag-wins scan so
- * the redirect names what gh will actually target when both aliases
- * occur (echoing an overridden earlier alias would misdirect the cd).
- * Arg-layer word scan only (display, not flag parsing — no regex over
- * the raw string): RIGHT→LEFT, at each position bare `-R`/`--repo`
- * first (echo flag + next word), then glued forms — `--repo=…` via
- * the same `=` prefix the helper matches, `-R…` ONLY when the
- * remainder looks like a slashful no-space target — a stricter shape
- * guard than glue-aware resolution (flags#11), which is safe: spaced
- * slashless lookalikes resolve to non-targets and release before any
- * echo runs, and a value word merely starting with `-R` must not
- * hijack the redirect text. First match from the right wins.
- * Never throws — static fallback on unparsable args (the evaluator's
- * fail-safe would still land the block verdict, but keep it clean).
+ * renders the EFFECTIVE `-R`/`--repo` target via the SAME
+ * `getFlagValue` call the predicate's verdict used — single source of
+ * truth, so the redirect always names where to cd (LAST-wins across
+ * the aliases, glue-aware). As-typed flag-echo fidelity is dropped
+ * deliberately (#39): a blocked command is never re-run verbatim;
+ * the reader needs WHERE to cd, and an unparsable target renders the
+ * honest fallback phrase instead of echoing a flag spelling. Never
+ * throws — both helpers are total functions over argv.
  */
 export function foreignRepoReason(ctx: PredicateContext): string {
   const words = ctx.input.args ?? [];
-  let flag = "-R";
-  let target: string | null = null;
-  for (let i = words.length - 1; i >= 0; i--) {
-    const t = words[i]?.text ?? "";
-    if (t === "-R" || t === "--repo") {
-      flag = t;
-      target = words[i + 1]?.text ?? "";
-      break;
-    }
-    if (t.startsWith("--repo=")) {
-      // Glued long form: the flag+value is ONE word — echo it
-      // verbatim ("--repo=cad0p/x"). Mirrors getFlagValue's
-      // `${flag}=` prefix match exactly, so a quoted VALUE that
-      // happens to look like `--repo=x/y` wins BOTH the resolution
-      // and the echo — consistent display.
-      flag = t;
-      break;
-    }
-    if (/^-R[^=\s]*\/\S*$/.test(t)) {
-      // Glued SHORT form (`-Rcad0p/x`): require a SLASHFUL no-space
-      // remainder — repo targets always contain `/`. Resolution is
-      // glue-aware now (flags#11 `{ gluedShorts: ["R"] }`) but this
-      // display scan keeps its stricter shape guard: spaced lookalike
-      // values ("-Rebased onto main") resolve SLASHLESS upstream and
-      // release via step 4 (never blocked → never echoed), while
-      // slashful ones can only ever cause a fail-closed over-block,
-      // where this branch echoes them verbatim. Slashless `-R…`
-      // words fall through to earlier positions.
-      flag = t;
-      break;
-    }
-  }
+  const target = getFlagValue(words, ["-R", "--repo"], {
+    gluedShorts: ["R"],
+  });
+  const via =
+    target !== null && target !== ""
+      ? `via ${target}`
+      : "via an unresolvable -R/--repo";
   // The subcommand is the FIRST exact `pr`/`issue` TOKEN in the argv.
   // Exact tokens only: the walker keeps quoted values as single words,
   // so MULTI-WORD values like "fix pr bug" can never match. (Accepted
   // display-only limitation: a single-word root-flag value that is
-  // exactly `pr`/`issue` and precedes the subcommand could still
-  // mislabel the PR/issue noun — contrived, verdict unaffected.
-  // Positional detection relative to the flag+value broke with the
-  // right→left scan above: the winning alias may sit at the line's
-  // end, past any subcommand.)
+  // exactly `pr`/`issue` could still mislabel the PR/issue noun —
+  // contrived, verdict unaffected.)
   const subWord = words.find(
     (w) => (w?.text ?? "") === "pr" || (w?.text ?? "") === "issue",
   );
   const sub = subWord?.text ?? "";
   const what = sub === "pr" ? "PR" : "issue";
-  // Space form: `-R <target>` / `--repo <target>`. Glued form: the
-  // word IS the flag+value (`--repo=x/y`, `-Rx/y`) — echo verbatim.
-  const via = target !== null && target !== "" ? `${flag} ${target}` : flag;
   return (
-    `The ${what} you're targeting via ${via} belongs to a foreign repo.\n` +
+    `The ${what} you're targeting ${via} belongs to a foreign repo.\n` +
     `REQUIREMENT: run a foreign subagent maintainer loop until good,\n` +
     `then cd into the foreign repo and target it from there.`
   );

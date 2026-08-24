@@ -83,22 +83,28 @@ export const ISSUE_BODY_ANCHOR = /^gh\s+issue\s+(?:create|edit)\b/i;
 export const REPO_CREATE_ANCHOR = /^gh\s+repo\s+(?:create|new)\b/i;
 
 /**
- * `gh-repo-flag-before-subcommand` pattern: a PURE ROUTER — `gh`
- * with a global flag BEFORE the subcommand, then a gated
- * `pr create|new|edit|merge` or `issue create|edit`. It only decides
- * "is this a flag-first gated command?" — all VALUE parsing (flag
- * identity, target extraction, help carve-out) happens on the walker
- * argv via `@cad0p/pi-steering-flags`' `hasFlag`/`getFlagValue` in
- * the rule's `unless` fn (arg layer, quote-aware). The router is
- * deliberately loose: it also routes non-repo flags (`-v`,
- * `--hostname`) and slashless `-R upstream` — the `unless` releases
- * those (they are not repo-targeting / are fork remote-name forms).
+ * `gh-repo-flag-before-subcommand` pattern: a SHAPE ROUTER — a gated
+ * `pr create|new|edit|merge` or `issue create|edit` with ZERO or ONE
+ * leading flag token (the optional group covers `gh pr merge …` AND
+ * `gh -R x/y pr merge …`; two leading flags stay unrouted). It only
+ * decides "is this a gated subcommand shape?" — whether the command
+ * REPO-TARGETS is decided by the `foreignRepoTarget` predicate's
+ * `-R/--repo` PRESENCE check on the walker argv (#39: presence, not
+ * position — subcommand-first `-R x/y pr merge` routes since the
+ * widening), via `@cad0p/pi-steering-flags`' `hasFlag`/`getFlagValue`
+ * (arg layer, quote-aware). Commands without any `-R/--repo` route
+ * but are RELEASED by the predicate and fall through to the
+ * per-subcommand rules — the widened anchor deliberately OVERLAPS the
+ * PR/issue body/create/merge anchors, and correctness rests on the
+ * evaluator's first-firing-rule-wins ordering plus that release
+ * fall-through, not on anchor disjointness. Slashless `-R upstream`
+ * routes too (fork remote-name form → released by the predicate).
  * Anchored `^gh\s` (no `echo gh …`). `repo create|new` is excluded
  * by design; read-only `pr view`/`issue list` never route. See the
  * rule doc comment.
  */
 export const REPO_FLAG_ANCHOR =
-  /^gh\s+-[^\s]+(?:\s+[^\s]+)?\s+(?:pr\s+(?:create|new|edit|merge)|issue\s+(?:create|edit))\b/i;
+  /^gh\s+(?:-[^\s]+(?:\s+[^\s]+)?\s+)?(?:pr\s+(?:create|new|edit|merge)|issue\s+(?:create|edit))\b/i;
 
 /**
  * A seed flag as its own token: long or short form, ` ` or `=`
