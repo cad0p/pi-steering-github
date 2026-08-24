@@ -80,10 +80,10 @@ describe("github plugin — foreignRepoTarget (basename match / fail-closed)", (
     assert.equal(await foreignRepoTarget(true, ctx), false);
   });
 
-  it("releases non-repo flags the router routes (-v, --hostname)", async () => {
-    // The pure-router anchor routes ANY first flag token; the
-    // predicate releases commands whose first flag is not the
-    // repo-flag family.
+  it("releases commands with no -R/--repo anywhere (absent, #39)", async () => {
+    // Presence-based gating (#39): `-v` / `--hostname` leading flags
+    // route under the widened shape router but carry NO repo flag —
+    // absent → release, fall-through to the per-subcommand rules.
     const vCtx = ctxWith("gh -v pr create --title t", {
       remote: "https://github.com/cad0p/pi-steering-github.git",
     });
@@ -92,6 +92,20 @@ describe("github plugin — foreignRepoTarget (basename match / fail-closed)", (
       remote: "https://github.com/cad0p/pi-steering-github.git",
     });
     assert.equal(await foreignRepoTarget(true, hCtx), false);
+  });
+
+  it("releases subcommand-first mutations with no -R anywhere (#39)", async () => {
+    // The core absent-state pins: plain gated mutations never touch
+    // the gate — zero verdict change for commands carrying no
+    // `-R`-shaped token.
+    const mCtx = ctxWith("gh pr merge --squash", {
+      remote: "https://github.com/cad0p/pi-steering-github.git",
+    });
+    assert.equal(await foreignRepoTarget(true, mCtx), false);
+    const eCtx = ctxWith("gh issue edit 3", {
+      remote: "https://github.com/cad0p/pi-steering-github.git",
+    });
+    assert.equal(await foreignRepoTarget(true, eCtx), false);
   });
 
   it("releases slashless -R upstream (fork remote-name form)", async () => {
@@ -295,6 +309,65 @@ describe("github plugin — foreignRepoTarget (basename match / fail-closed)", (
     // `??` and took the basename path (release for own repo). gh
     // errors on an empty repo anyway — accepted over-block.
     const ctx = ctxWith("gh -R cad0p/pi-steering-github pr create --repo=", {
+      remote: "https://github.com/cad0p/pi-steering-github.git",
+    });
+    assert.equal(await foreignRepoTarget(true, ctx), true);
+  });
+
+  it("fails closed: subcommand-position trailing bare -R (present-unparsable, #39)", async () => {
+    // The unparsable fail-close holds in BOTH flag positions now:
+    // `gh pr merge -R` carries a repo flag (present) whose value is
+    // unresolvable (trailing valueless alias → null) — no escape via
+    // position.
+    const ctx = ctxWith("gh pr merge -R", {
+      remote: "https://github.com/cad0p/pi-steering-github.git",
+    });
+    assert.equal(await foreignRepoTarget(true, ctx), true);
+  });
+
+  it("fails closed: subcommand-position empty attached --repo= (#39)", async () => {
+    const ctx = ctxWith("gh pr create --title t --repo=", {
+      remote: "https://github.com/cad0p/pi-steering-github.git",
+    });
+    assert.equal(await foreignRepoTarget(true, ctx), true);
+  });
+
+  it("releases a subcommand-first OWN-repo target (#39)", async () => {
+    // `gh issue edit 3 --repo=<cwd repo>` — basename equality →
+    // release; falls through to the per-subcommand policies.
+    const ctx = ctxWith("gh issue edit 3 --repo=cad0p/pi-steering-github", {
+      remote: "https://github.com/cad0p/pi-steering-github.git",
+    });
+    assert.equal(await foreignRepoTarget(true, ctx), false);
+  });
+
+  it("fires on a subcommand-first FOREIGN glued short form (#39)", async () => {
+    const ctx = ctxWith("gh issue edit 3 -Rcad0p/other", {
+      remote: "https://github.com/cad0p/pi-steering-github.git",
+    });
+    assert.equal(await foreignRepoTarget(true, ctx), true);
+  });
+
+  it("accepted limitation: -R-shaped VALUE word glues and over-blocks (subcommand-first)", async () => {
+    // `gh -v pr merge -m "-Rfoo/bar ref"`: pre-#39 this released at
+    // the shape check (first flag `-v` is not the repo family); now
+    // ANY `-R`-shaped word makes the gate PRESENT, and glue-aware
+    // resolution picks the slashful `foo/bar` → basename mismatch →
+    // fire. Same accepted over-block class as the flags#11 opt-in,
+    // newly reachable from subcommand-first shapes.
+    const ctx = ctxWith("gh -v pr merge -m -Rfoo/bar ref", {
+      remote: "https://github.com/cad0p/pi-steering-github.git",
+    });
+    assert.equal(await foreignRepoTarget(true, ctx), true);
+  });
+
+  it("BEHAVIOR DELTA (#39): non-repo leading flag + later real --repo now blocks", async () => {
+    // `gh -v pr merge --repo=cad0p/foreign`: the #36-era shape check
+    // released on the FIRST flag token (`-v`) even though a real repo
+    // flag sat later in the line; presence-based gating sees it →
+    // fire. Deliberate policy fix (#34-style delta row), pinned so it
+    // cannot regress silently.
+    const ctx = ctxWith("gh -v pr merge --repo=cad0p/foreign", {
       remote: "https://github.com/cad0p/pi-steering-github.git",
     });
     assert.equal(await foreignRepoTarget(true, ctx), true);
