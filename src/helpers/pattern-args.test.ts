@@ -57,11 +57,6 @@ function makeCtx(
   return ctx as unknown as PredicateContext;
 }
 
-/** The pinned substitution form the rules require. */
-function stripSubstitution(file: string): string {
-  return `<(perl -0777 -pe '${BODY_STRIP}' ${file})`;
-}
-
 // ---------------------------------------------------------------------------
 // unquote / findFlagValue (unchanged helpers)
 // ---------------------------------------------------------------------------
