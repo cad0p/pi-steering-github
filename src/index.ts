@@ -61,6 +61,8 @@
  */
 
 import type { Plugin, PredicateShape, Rule } from "@cad0p/pi-steering";
+import type { ForeignRepoTargetArgs } from "./predicates/foreign-repo-target.ts";
+import { foreignRepoTarget } from "./predicates/foreign-repo-target.ts";
 import { missingVaultBodyFile } from "./predicates/missing-vault-body-file.ts";
 import { ghRepoCreateNeedsSeed } from "./rules/gh-repo-create-needs-seed.ts";
 import { ghRepoFlagBeforeSubcommand } from "./rules/gh-repo-flag-before-subcommand.ts";
@@ -81,6 +83,32 @@ declare global {
      * anything unverifiable counts as missing.
      */
     missingVaultBodyFile: PredicateShape<{ section: "prs" | "issues" }>;
+    /**
+     * `when.foreignRepoTarget` — true (rule BLOCKS) when a flag-first
+     * `gh -R/--repo …` invocation targets a FOREIGN repository:
+     * the effective `-R`/`--repo` target's basename differs from
+     * the cwd repo's basename. Backs
+     * `gh-repo-flag-before-subcommand`.
+     *
+     * Fail-closed doctrine: an unparsable target (including the
+     * glued short form `-Rx/y`, invisible to the flags helpers), a
+     * walker-unknown cwd, or an unresolvable repo all BLOCK.
+     * Released without consulting any knob: non-repo first flags
+     * (`-v`, `--hostname`), and slashless remote-name forms (`-R
+     * upstream`).
+     *
+     * Basename policy = fork→upstream tolerance (#19), hardcoded —
+     * basename EQUALITY allows `gh -R upstream/foo pr create` from
+     * inside the `me/foo` clone; there is deliberately no `matchBy`
+     * / `flags` arg, the policy is documented, not configurable.
+     *
+     * Boolean-bare shape (the `infoOnly` precedent): bare `true` ≡
+     * spread `{}` — both enable the gate and run the argv logic
+     * (both verified typechecking); bare `false` NEVER fires
+     * (handlers receive the leaf value verbatim, so the handler's
+     * step-0 `args === false` guard makes a disabled config inert).
+     */
+    foreignRepoTarget: PredicateShape<boolean, ForeignRepoTargetArgs>;
   }
 }
 
@@ -125,7 +153,7 @@ export const rules = [
  */
 export const githubPlugin = {
   name: "github",
-  predicates: { missingVaultBodyFile },
+  predicates: { missingVaultBodyFile, foreignRepoTarget },
   rules,
 } as const satisfies Plugin;
 
@@ -161,6 +189,8 @@ export {
   SUBJECT_WITH_REF,
   TITLE_WITH_REF,
 } from "./helpers/patterns.ts";
+export type { ForeignRepoTargetArgs } from "./predicates/foreign-repo-target.ts";
+export { foreignRepoTarget } from "./predicates/foreign-repo-target.ts";
 export {
   BODY_STRIP,
   missingVaultBodyFile,
