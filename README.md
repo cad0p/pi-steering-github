@@ -4,7 +4,7 @@ GitHub workflow rules for [pi-steering](https://github.com/cad0p/pi-steering): e
 
 ## What it ships
 
-One `Plugin` (`name: "github"`) with six rules and one predicate:
+One `Plugin` (`name: "github"`) with six rules and two predicates:
 
 | Rule | Fires on | Blocks when |
 | --- | --- | --- |
@@ -18,6 +18,7 @@ One `Plugin` (`name: "github"`) with six rules and one predicate:
 | Predicate | Purpose |
 | --- | --- |
 | `missingVaultBodyFile` | true when `--body-file` is absent, not the pinned `<(perl -0777 -pe '<BODY_STRIP>' <file>)` substitution form, or the path fails the vault check (nonexistent, outside a napkin vault, not under `<repo>/<section>/`) |
+| `foreignRepoTarget` | true when a flag-first `gh -R/--repo …` invocation targets a FOREIGN repo — the effective `-R`/`--repo` target's basename differs from the cwd repo's basename; fail-closed on unparsable targets (incl. glued `-Rx/y`), unknown cwd, unresolvable repo |
 
 All rules are **strict** — no `noOverride: false`, so there is no agent-side override escape hatch. The policy is unconditional.
 
@@ -41,8 +42,10 @@ src/
 │   ├── patterns.test.ts            # pattern-contract + command-anchor pins
 │   └── repo-name.ts                # repoName
 ├── predicates/
-│   ├── missing-vault-body-file.ts  # the predicate handler
-│   └── missing-vault-body-file.test.ts
+│   ├── missing-vault-body-file.ts  # the vault body-file predicate handler
+│   ├── missing-vault-body-file.test.ts
+│   ├── foreign-repo-target.ts      # the -R foreign-target gate handler
+│   └── foreign-repo-target.test.ts
 └── rules/
     ├── gh-repo-flag-before-subcommand.ts + .test.ts
     ├── pr-body-from-vault-file.ts
@@ -69,9 +72,10 @@ import { flagsPlugin } from "@cad0p/pi-steering-flags";
 import githubPlugin from "@cad0p/pi-steering-github";
 
 export default defineConfig({
-  // REQUIRED: the merge rule's gate is fully declarative and composes
-  // two pi-steering-flags predicates (`not.infoOnly`,
-  // `requiresFlagValue`) — without flagsPlugin those keys throw
+  // REQUIRED: two rules compose pi-steering-flags predicates
+  // declaratively — `pr-merge-needs-closing-keywords` (`not.infoOnly`
+  // + `requiresFlagValue`) and `gh-repo-flag-before-subcommand`
+  // (`not.infoOnly`) — without flagsPlugin those keys throw
   // UnknownPredicateError at evaluation time.
   plugins: [flagsPlugin, githubPlugin],
 });
@@ -85,7 +89,12 @@ Listing the plugins feeds their rule/predicate names into `defineConfig`'s type 
 
 `gh -R x/y pr create|new|edit|merge` and `gh -R x/y issue create|edit` target a **foreign repo** and are blocked with a redirect: run a foreign subagent maintainer loop until good, then cd into the foreign repo and target it from there. This is the ENTRY step of the foreign flow — the rule sits FIRST in the roster so the redirect is the first thing the agent meets (its `^gh\s+-…` router anchor is disjoint from the other rules' `^gh\s+(?:pr|issue|repo)` anchors, so first-match routing is unaffected).
 
-All four typed forms are covered — `-R x/y`, `--repo x/y`, `--repo=x/y`, `-Rx/y` — plus any other flag-first form (`-v`, `--hostname`) which the router releases (not repo-targeting). Target resolution is **last-wins across the `-R`/`--repo` aliases**, matching gh/cobra (repeated spellings of one logical flag collapse to their final value): when both aliases occur, the LAST occurrence is the effective target, and a trailing valueless alias or an empty attached value as the last occurrence fails closed instead of falling back to the overridden earlier alias. The reason echoes the subcommand and the EFFECTIVE flag+target AS TYPED — the echo scans right→left like the resolution (bare aliases, `--repo=` glued, and glued short forms that look like slashful targets), so the redirect names what gh will actually target:
+All four typed forms are covered — `-R x/y`, `--repo x/y`, `--repo=x/y`, `-Rx/y` — plus any other flag-first form (`-v`, `--hostname`) which the router releases (not repo-targeting). The gate is **fully declarative** — zero condition code, an AND of two registered-predicate leaves:
+
+- `foreignRepoTarget: true` — this package's registered predicate: blocks when the EFFECTIVE `-R`/`--repo` target is a foreign repo.
+- `not.infoOnly({ extraFlags: ["-h"] })` — the read-only carve-out, below.
+
+Target resolution is **last-wins across the `-R`/`--repo` aliases**, matching gh/cobra (repeated spellings of one logical flag collapse to their final value): when both aliases occur, the LAST occurrence is the effective target, and a trailing valueless alias or an empty attached value as the last occurrence fails closed instead of falling back to the overridden earlier alias. The reason echoes the subcommand and the EFFECTIVE flag+target AS TYPED — the echo scans right→left like the resolution (bare aliases, `--repo=` glued, and glued short forms that look like slashful targets), so the redirect names what gh will actually target:
 
 ```
 The PR you're targeting via -R cad0p/x belongs to a foreign repo.
@@ -93,12 +102,12 @@ REQUIREMENT: run a foreign subagent maintainer loop until good,
 then cd into the foreign repo and target it from there.
 ```
 
-- **Fork→upstream flow is allowed**: when the `-R` target's basename equals the cwd repo's basename (origin URL basename, cwd-folder fallback — the existing `repoName` helper), the command passes — `gh -R upstream/foo pr create` from inside the `me/foo` clone is the most common legit `-R` use. Cost accepted: `-R <own-repo> pr merge` from inside the repo is indistinguishable and slips through — these gates are heuristic discipline, not security. For fork workflows, `gh repo set-default upstream` makes gh target upstream by default (no `-R` needed).
+- **Fork→upstream flow is allowed**: when the `-R` target's basename equals the cwd repo's basename (origin URL basename, cwd-folder fallback — the existing `repoName` helper), the command passes — `gh -R upstream/foo pr create` from inside the `me/foo` clone is the most common legit `-R` use. This basename equality IS the policy (#19), hardcoded in the predicate — no config knob. Cost accepted: `-R <own-repo> pr merge` from inside the repo is indistinguishable and slips through — these gates are heuristic discipline, not security. For fork workflows, `gh repo set-default upstream` makes gh target upstream by default (no `-R` needed).
 - **Fail-closed**: unknown cwd / unresolvable repo / unparsable target / a valueless-or-empty last alias occurrence → blocked.
-- **Read-only `--help`/`-h` never blocks** — token-level carve-out in the rule's `unless` via `hasFlag` from `@cad0p/pi-steering-flags` (a help token inside a quoted value can't falsely exempt). The rule's flag parsing (target extraction, help carve-out) runs entirely on the walker-parsed argv via the flags helpers — the pattern is a pure router, no regex flag parsing.
+- **Read-only `--help`/`-h` never blocks** — declaratively, via the `not.infoOnly({ extraFlags: ["-h"] })` leaf: the flags plugin's `--help`/`--version` defaults PLUS GitHub's additive `-h`. Accepted exposure: a gated invocation carrying `--version` (bare or attached, e.g. `gh -R owner/x pr create --version`) is now ALLOWED too — gh errors on it for pr/issue subcommands, so nothing real can happen; `-v` is deliberately NOT in the info-only set and stays gated. Both leaves are token-level over walker argv (a help token inside a quoted value can't falsely exempt); the pattern itself is a pure router, no regex flag parsing.
 - **Glued short form `-Rcad0p/x`**: the flags helpers can't see it (walker keeps it as one word) → target unparsable → fail-closed block, even for the own-repo case. Accepted over-block; upstream gap filed as cad0p/pi-steering-flags#11.
 - **`repo create|new` is excluded by design**: nothing to cd into — the target is the positional argument (`gh repo create owner/name` works from any cwd, and the seed rule gates the actual create form).
-- **Slashless values** (`-R upstream`, a remote-name form) route but are **released** by the `unless` (no `/` → not a foreign owner/repo redirect; the fork→upstream flow passes through unchanged).
+- **Slashless values** (`-R upstream`, a remote-name form) route but are **released** by `foreignRepoTarget` (no `/` → not a foreign owner/repo redirect; the fork→upstream flow passes through unchanged).
 
 ### `pr-body-from-vault-file`
 
@@ -159,9 +168,15 @@ The seed commit is the PR's base — the PR diff replaces it, so the first conte
 
 Non-seed flags (`--source`, `--push`, `--clone`, `--description`, `--public|--private`, `--remote`, `--team`, …) do **not** exempt: `gh repo create x --source . --push` is blocked too — only a seed flag lets the command through. The rule is a form check (like the body-file rules); gh's own flag validation governs seed/`--source` combos at runtime.
 
-## Predicate
+## Predicates
+
+### `missingVaultBodyFile`
 
 `when.missingVaultBodyFile` takes `{ section: "prs" | "issues" }` and returns `true` (rule blocks) when the command's `--body-file` value is missing, not the pinned `<(perl -0777 -pe '<BODY_STRIP>' <path>)` substitution form (direct paths, inline `--body`, wrong inner commands, extra or missing tokens), or the path fails the vault check: it must resolve to a real file inside a napkin vault (`.napkin/` / `.obsidian/.napkin/` walk-up), under a `<repo>/<section>/` directory (`<repo>` = origin URL basename, cwd-folder fallback). Fail-closed: anything unverifiable (incl. walker-unknown cwd) counts as missing. The `section` argument selects the required `<repo>/<section>/` directory — the convention is taught by the rule reasons AND enforced here.
+
+### `foreignRepoTarget`
+
+`when.foreignRepoTarget` is boolean-bare (`true` to enable, `false` never fires; bare `true` ≡ spread `{}`) and takes no arguments on purpose — the basename policy IS the semantics (#19), there is no `matchBy`/`flags` knob. It returns `true` (rule blocks) when the effective `-R`/`--repo` target is a foreign repo: router-release for non-repo first flags, last-wins alias resolution, slashless release, then basename compare against the cwd repo. Fail-closed rails: unparsable target (including glued `-Rx/y`), walker-unknown cwd, unresolvable repo.
 
 ## Disabling
 
@@ -193,7 +208,7 @@ When the built-in predicate isn't enough, reach for the exported helpers inside 
 - `isInfoOnly(args, extraFlags?)` from `@cad0p/pi-steering-flags` — token-level info-only check for `--help`/`--version` plus additive CLI-specific flags such as `-h`; quote-aware, including attached forms.
 - `unquote(text)` / `argText(ctx)` — low-level walker-word utilities.
 
-The pattern constants (`CLOSING_KEYWORD`, `ISSUE_REF`, `TITLE_WITH_REF`, `SUBJECT_WITH_REF`, `BODY_WITH_REF`, `PR_BODY_ANCHOR`, `PR_CREATE_ANCHOR`, `PR_MERGE_ANCHOR`, `ISSUE_BODY_ANCHOR`, `REPO_CREATE_ANCHOR`, `REPO_CREATE_SEED_FLAG`, `REPO_CREATE_PATTERN`, `REPO_FLAG_ANCHOR`) are exported too — they are what the rules ship, pinned by the unit tests. The rule objects (`ghRepoFlagBeforeSubcommand`, …), the `foreignRepoReason` ReasonFn (module-exported from `src/rules/gh-repo-flag-before-subcommand.ts`), and the `repoName` helper (from `src/helpers/repo-name.ts`) are re-exported as well.
+The pattern constants (`CLOSING_KEYWORD`, `ISSUE_REF`, `TITLE_WITH_REF`, `SUBJECT_WITH_REF`, `BODY_WITH_REF`, `PR_BODY_ANCHOR`, `PR_CREATE_ANCHOR`, `PR_MERGE_ANCHOR`, `ISSUE_BODY_ANCHOR`, `REPO_CREATE_ANCHOR`, `REPO_CREATE_SEED_FLAG`, `REPO_CREATE_PATTERN`, `REPO_FLAG_ANCHOR`) are exported too — they are what the rules ship, pinned by the unit tests. The rule objects (`ghRepoFlagBeforeSubcommand`, …), both predicate handlers (`missingVaultBodyFile`, `foreignRepoTarget`), the `foreignRepoReason` ReasonFn (module-exported from `src/rules/gh-repo-flag-before-subcommand.ts`), and the `repoName` helper (from `src/helpers/repo-name.ts`) are re-exported as well.
 
 ## Known limitations
 
@@ -203,9 +218,9 @@ The pattern constants (`CLOSING_KEYWORD`, `ISSUE_REF`, `TITLE_WITH_REF`, `SUBJEC
 - **Exact quoted info tokens**: `isInfoOnly` intentionally removes shell quotes before checking exact argv tokens. Consequently, `--subject "--help"` and `--subject "--version"` are indistinguishable from bare info-only flags and are released; surrounding text such as `"see --help"` and `"see --version"` remains blocked.
 - **Quoted-value false exemption (`gh-repo-create-needs-seed`)**: a seed-looking token inside a QUOTED flag value (e.g. `--description "see --license mit"`) falsely exempts the command — the token guard kills only GLUED lookalikes (`-local`, `foo--add-readme`), not space-separated tokens inside quoted values. Deliberately exploitable: an agent could embed a fake seed mention and still birth an empty repo. Accepted — same value-region class as the PR_* patterns; the walker contract is the plugin's foundation.
 - **`-R` after the subcommand is not gated by `gh-repo-flag-before-subcommand`**: `gh pr create -R x/y …` still matches the pr anchors (no bypass), but the foreign target isn't redirected (the `-R` flag lands after the subcommand the anchors match). Different, smaller class — follow-up.
-- **Slashless `-R <remote>`** (remote-name form, no `/`) routes to the rule but is released by the `unless` (no `/` → not a foreign owner/repo redirect) — the fork→upstream flow passes through unchanged (allowed).
+- **Slashless `-R <remote>`** (remote-name form, no `/`) routes to the rule but is released by the `foreignRepoTarget` predicate (no `/` → not a foreign owner/repo redirect) — the fork→upstream flow passes through unchanged (allowed).
 - **`-R x/y repo create` stays ungated** by the redirect (the repo doesn't exist yet — nothing to cd into; `repo create` never needs `-R` since the target is the positional argument, and the seed rule gates the actual create form).
-- **`-Rcad0p/x` glued short form** (no space) is fail-closed-blocked even for the own-repo case — `hasFlag`/`getFlagValue` from `@cad0p/pi-steering-flags` can't see the value (walker keeps the glued word intact); the target is unparsable → block. Upstream gap: cad0p/pi-steering-flags#11.
+- **`-Rcad0p/x` glued short form** (no space) is fail-closed-blocked even for the own-repo case — `getFlagValue` from `@cad0p/pi-steering-flags` can't see the value (walker keeps the glued word intact); the target is unparsable → block. Upstream gap: cad0p/pi-steering-flags#11.
 
 ## License
 
