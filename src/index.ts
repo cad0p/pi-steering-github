@@ -90,9 +90,11 @@ declare global {
      * the cwd repo's basename. Backs
      * `gh-repo-flag-before-subcommand`.
      *
-     * Fail-closed doctrine: an unparsable target (including the
-     * glued short form `-Rx/y`, invisible to the flags helpers), a
-     * walker-unknown cwd, or an unresolvable repo all BLOCK.
+     * Fail-closed doctrine: an unparsable target (now only a
+     * valueless or empty-valued LAST alias occurrence — glued short
+     * forms resolve via `{ gluedShorts: ["R"] }`, upstream
+     * cad0p/pi-steering-flags#11), a walker-unknown cwd, or an
+     * unresolvable repo all BLOCK.
      * Released without consulting any knob: non-repo first flags
      * (`-v`, `--hostname`), and slashless remote-name forms (`-R
      * upstream`).
