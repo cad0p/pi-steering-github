@@ -779,3 +779,77 @@ describe("github plugin — gh-repo-create-needs-seed (repo create must seed)", 
     assert.equal(block, false, `expected allow, got block by ${rule}`);
   });
 });
+
+describe("github plugin — gh-repo-flag-before-subcommand (-R foreign-target gate)", () => {
+  // The gate is declarative over two leaves: `not.infoOnly({
+  // extraFlags: ["-h"] })` + this package's `foreignRepoTarget`
+  // predicate. The default evaluateBash host answers the cwd repo as
+  // `cad0p/Goldmine` (origin URL), so `Goldmine`-basenamed targets
+  // are the fork→upstream flow and anything else is FOREIGN.
+
+  it("blocks a foreign -R target with the redirect reason tag", async () => {
+    const { block, rule } = await evaluateBash(
+      makeFixtureDir(),
+      "gh -R cad0p/other-repo pr create --title t",
+    );
+    assert.equal(block, true, "expected block");
+    assert.equal(rule, "gh-repo-flag-before-subcommand");
+  });
+
+  it("blocks a foreign --repo=x/y glued long form too", async () => {
+    const { block, rule } = await evaluateBash(
+      makeFixtureDir(),
+      "gh --repo=cad0p/other-repo issue create --title t",
+    );
+    assert.equal(block, true, "expected block");
+    assert.equal(rule, "gh-repo-flag-before-subcommand");
+  });
+
+  it("allows the fork→upstream flow (target basename == cwd repo basename)", async () => {
+    // `gh -R upstream/Goldmine pr create` from inside the
+    // `cad0p/Goldmine` clone — the most common legit `-R` use.
+    const { block, rule } = await evaluateBash(
+      makeFixtureDir(),
+      "gh -R upstream/Goldmine pr create --title t",
+    );
+    assert.equal(block, false, `expected allow, got block by ${rule}`);
+  });
+
+  it("releases slashless -R upstream (remote-name form)", async () => {
+    const { block, rule } = await evaluateBash(
+      makeFixtureDir(),
+      "gh -R upstream pr create --title t",
+    );
+    assert.equal(block, false, `expected allow, got block by ${rule}`);
+  });
+
+  it("BEHAVIOR DELTA (#36): bare --version exempts (infoOnly default set)", async () => {
+    // A gated invocation carrying --version flips block→allow:
+    // the not.infoOnly leaf allows before the foreign-target
+    // predicate is consulted. gh errors on --version for pr/issue
+    // subcommands anyway — invalid invocation, nothing real can
+    // happen.
+    const { block, rule } = await evaluateBash(
+      makeFixtureDir(),
+      "gh -R cad0p/other-repo pr create --version",
+    );
+    assert.equal(block, false, `expected allow, got block by ${rule}`);
+  });
+
+  it("BEHAVIOR DELTA (#36): attached --version=1 exempts too", async () => {
+    const { block, rule } = await evaluateBash(
+      makeFixtureDir(),
+      "gh -R cad0p/other-repo pr create --version=1",
+    );
+    assert.equal(block, false, `expected allow, got block by ${rule}`);
+  });
+
+  it("keeps -v gated (deliberately absent from the infoOnly set)", async () => {
+    const { block, rule } = await evaluateBash(
+      makeFixtureDir(),
+      "gh -R cad0p/other-repo pr create -v",
+    );
+    assert.equal(block, true, "expected block");
+    assert.equal(rule, "gh-repo-flag-before-subcommand");
+  });
+});
