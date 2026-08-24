@@ -16,16 +16,19 @@
  *      token; commands whose FIRST flag token is NOT the repo-flag
  *      family (`-R`, `--repo`, glued `-R…`, `--repo=…`) are not
  *      repo-targeting (`-v`, `--hostname`, …) → release.
- *   2. Target resolution via `getFlagValue`
- *      (`@cad0p/pi-steering-flags`): LAST-wins across the
- *      `-R`/`--repo` alias set (gh/cobra collapse repeated spellings
- *      of one logical flag to the final value — issue #34). A
- *      trailing valueless alias or an empty attached value as the
- *      last occurrence wins and fail-closes in step 3.
- *   3. Unparsable target (`null` / `""`) → BLOCK. Includes the glued
- *      short form `-Rcad0p/x`: the walker keeps it as one word and
- *      the flags helpers can't see the value (accepted over-block;
- *      upstream gap cad0p/pi-steering-flags#11).
+ *   2. Target resolution via `getFlagValue` with
+ *      `{ gluedShorts: ["R"] }` (`@cad0p/pi-steering-flags`, arg
+ *      layer, quote-aware): LAST-wins across the `-R`/`--repo` alias
+ *      set (gh/cobra collapse repeated spellings of one logical flag
+ *      to the final value — issue #34), resolving bare `-R`, attached
+ *      `--repo=`/`-R=`, AND glued short forms like `-Rcad0p/x`
+ *      (upstream cad0p/pi-steering-flags#11 shipped the opt-in;
+ *      per-position precedence exact > attached > glued). A trailing
+ *      valueless alias or an empty attached value as the last
+ *      occurrence wins and fail-closes in step 3.
+ *   3. Unparsable target (`null` / `""`) → BLOCK. Only trailing-
+ *      valueless aliases and empty attached values remain unparsable
+ *      now that glued forms resolve.
  *   4. Slashless target (`-R upstream`, remote-name form) → release:
  *      no `/` means it cannot be a foreign-owner/repo redirect; the
  *      fork→upstream flow passes through unchanged.
@@ -99,18 +102,23 @@ export const foreignRepoTarget: PredicateHandler<
   if (!isRepoFlag) return false; // not a repo-targeting command
 
   // Step 2 — the `-R`/`--repo` target, via `@cad0p/pi-steering-flags`
-  // (arg layer, quote-aware, `--flag=value` + `--flag value` forms).
-  // The alias SET makes the resolution LAST-wins across `-R`/`--repo`
-  // (gh/cobra collapse repeated spellings of one logical flag to the
-  // final value) — the old `??` composition let the FIRST-seen alias
-  // win and miss a cross-alias override (issue #34). A trailing
-  // valueless alias or an empty attached value as the last occurrence
-  // wins and fail-closes (null / "" → block below). Glued short form
-  // `-Rcad0p/x` is INVISIBLE to the helpers (the walker keeps it as
-  // one word) — `getFlagValue` returns null → fail-closed block
-  // (accepted over-block; upstream gap filed as
-  // cad0p/pi-steering-flags#11).
-  const target = getFlagValue(words, ["-R", "--repo"]);
+  // (arg layer, quote-aware, `--flag=value` + `--flag value` + glued
+  // short forms). The alias SET makes the resolution LAST-wins across
+  // `-R`/`--repo` (gh/cobra collapse repeated spellings of one
+  // logical flag to the final value) — the old `??` composition let
+  // the FIRST-seen alias win and miss a cross-alias override (issue
+  // #34). A trailing valueless alias or an empty attached value as
+  // the last occurrence wins and fail-closes (null / "" → block
+  // below). `gluedShorts: ["R"]` opts into decomposing words shaped
+  // `-R<rest>` at any position (upstream flags#11): slashless rest
+  // releases via step 4, so quoted body values like "-Rebased onto
+  // main" can never cause a false block; a SLASHFUL lookalike body
+  // value (`-m "-Rfoo/bar ref"`) hijacks resolution → possible
+  // over-BLOCK — fail-closed direction, accepted (ShellCheck-norm
+  // opt-in contract).
+  const target = getFlagValue(words, ["-R", "--repo"], {
+    gluedShorts: ["R"],
+  });
   // Step 3 — fail-closed on an unparsable target.
   if (target === null || target === "") return true;
   // Step 4 — slashless remote-name forms (`-R upstream`) are the
