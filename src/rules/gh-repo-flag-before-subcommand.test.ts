@@ -253,6 +253,29 @@ describe("github plugin — gh-repo-flag-before-subcommand composed gate (engine
     );
     assert.equal(block, false, `expected allow, got block by ${rule}`);
   });
+
+  it("glue-aware: own-repo -Rcad0p/x releases, foreign blocks (e2e)", async () => {
+    // Upstream cad0p/pi-steering-flags#11 adoption (`{ gluedShorts:
+    // ["R"] }`): the walker keeps `-Rcad0p/…` as ONE word and target
+    // resolution now sees it — own repo basename-matches → allow
+    // (the pre-adoption fail-closed over-block is gone); foreign
+    // owner/repo → block.
+    const own = await evaluateBash(
+      makeFixtureDir(),
+      "gh -Rcad0p/pi-steering-github pr merge --squash",
+    );
+    assert.equal(own.block, false, `expected allow, got block by ${own.rule}`);
+    const foreign = await evaluateBash(
+      makeFixtureDir(),
+      "gh -Rcad0p/other pr merge --squash",
+    );
+    assert.equal(foreign.block, true, "expected block");
+    assert.equal(
+      foreign.rule,
+      "gh-repo-flag-before-subcommand",
+      `for: foreign glued`,
+    );
+  });
 });
 
 describe("github plugin — gh-repo-flag-before-subcommand ReasonFn (dynamic)", () => {
@@ -341,12 +364,15 @@ describe("github plugin — gh-repo-flag-before-subcommand ReasonFn (dynamic)", 
     );
   });
 
-  it("a value word starting with -R does NOT hijack the echo (slashful-glued guard)", () => {
-    // The glued SHORT branch only accepts words shaped like repo
-    // targets (`-R…/…`); getFlagValue exact-matches the bare `-R`
-    // token, so a quoted VALUE like "-Rebased onto main" is invisible
-    // to the resolution — the echo must stay equally blind and keep
-    // echoing the real (anchor-guaranteed) leading repo flag.
+  it("a value word starting with -R does NOT hijack the echo (spaced-value guard)", () => {
+    // Glue-aware resolution now decomposes `-R<rest>` words at any
+    // position, but a quoted VALUE like "-Rebased onto main" resolves
+    // to a SLASHLESS target → step-4 release — this command is never
+    // blocked at rule level anymore, so the pin below asserts display
+    // robustness only: the glued-short echo branch still demands a
+    // slashful no-space remainder (`-R…/…`), so spaced lookalike
+    // values never hijack the redirect text. Accepted display-only
+    // divergence from resolution (fail-closed direction).
     const reason = foreignRepoReason(
       ctxWith('gh --repo cad0p/other pr create --body "-Rebased onto main"'),
     );

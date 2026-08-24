@@ -78,9 +78,11 @@ export const ghRepoFlagBeforeSubcommand = {
  * the raw string): RIGHT→LEFT, at each position bare `-R`/`--repo`
  * first (echo flag + next word), then glued forms — `--repo=…` via
  * the same `=` prefix the helper matches, `-R…` ONLY when the
- * remainder looks like a slashful target (the helper exact-matches
- * the bare `-R` token, so a value word merely starting with `-R`
- * must not hijack the echo). First match from the right wins.
+ * remainder looks like a slashful no-space target — a stricter shape
+ * guard than glue-aware resolution (flags#11), which is safe: spaced
+ * slashless lookalikes resolve to non-targets and release before any
+ * echo runs, and a value word merely starting with `-R` must not
+ * hijack the redirect text. First match from the right wins.
  * Never throws — static fallback on unparsable args (the evaluator's
  * fail-safe would still land the block verdict, but keep it clean).
  */
@@ -105,13 +107,15 @@ export function foreignRepoReason(ctx: PredicateContext): string {
       break;
     }
     if (/^-R[^=\s]*\/\S*$/.test(t)) {
-      // Glued SHORT form (`-Rcad0p/x`): require a SLASHFUL remainder —
-      // repo targets always contain `/`. getFlagValue only exact-
-      // matches the `-R` token, so an arbitrary value word starting
-      // with `-R` (e.g. a body value "-Rebased onto main") is
-      // invisible to the RESOLUTION; the echo must stay equally blind
-      // or it would hijack the redirect text with garbage. Slashless
-      // `-R…` words fall through to earlier positions.
+      // Glued SHORT form (`-Rcad0p/x`): require a SLASHFUL no-space
+      // remainder — repo targets always contain `/`. Resolution is
+      // glue-aware now (flags#11 `{ gluedShorts: ["R"] }`) but this
+      // display scan keeps its stricter shape guard: spaced lookalike
+      // values ("-Rebased onto main") resolve SLASHLESS upstream and
+      // release via step 4 (never blocked → never echoed), while
+      // slashful ones can only ever cause a fail-closed over-block,
+      // where this branch echoes them verbatim. Slashless `-R…`
+      // words fall through to earlier positions.
       flag = t;
       break;
     }

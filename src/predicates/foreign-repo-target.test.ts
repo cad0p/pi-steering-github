@@ -137,16 +137,104 @@ describe("github plugin — foreignRepoTarget (basename match / fail-closed)", (
     assert.equal(await foreignRepoTarget(true, ctx), false);
   });
 
-  it("BEHAVIOR DELTA: own-repo glued short form -Rcad0p/x FIRES (fail-closed)", async () => {
-    // `getFlagValue` cannot see `-Rcad0p/x` (the walker keeps it as
-    // ONE word; the flags helpers match bare `-R` / `--repo=` only).
-    // Target unparsable → cannot prove same-repo → fire. Accepted
-    // over-block (upstream gap cad0p/pi-steering-flags#11). This
-    // pins the delta vs the old `parseRepoFlagTarget` (which
-    // allowed).
+  it("releases own-repo glued short form -Rcad0p/x (basename match)", async () => {
+    // Glue-aware resolution (upstream cad0p/pi-steering-flags#11,
+    // `{ gluedShorts: ["R"] }` opt-in): `-Rcad0p/pi-steering-github`
+    // resolves → basename equality → release. The pre-#36 parser
+    // allowed this too — the #36-era fail-closed over-block delta
+    // converges back to zero.
     const ctx = ctxWith("gh -Rcad0p/pi-steering-github pr create --title t", {
       remote: "https://github.com/cad0p/pi-steering-github.git",
     });
+    assert.equal(await foreignRepoTarget(true, ctx), false);
+  });
+
+  it("fires on a foreign glued short form -Rcad0p/other", async () => {
+    // Glue awareness cuts both ways: a FOREIGN owner/repo in glued
+    // short form now RESOLVES instead of fail-closing on null —
+    // basename mismatch → fire.
+    const ctx = ctxWith("gh -Rcad0p/other pr merge --squash", {
+      remote: "https://github.com/cad0p/pi-steering-github.git",
+    });
+    assert.equal(await foreignRepoTarget(true, ctx), true);
+  });
+
+  it("BEHAVIOR DELTA (#34): glued member loses to later bare alias", async () => {
+    // `gh -Rcad0p/other … --repo cad0p/pi-steering-github`: LAST-wins
+    // spans mixed forms — the trailing bare `--repo` overrides the
+    // earlier glued occurrence → own repo → release.
+    const ctx = ctxWith(
+      "gh -Rcad0p/other pr create --repo cad0p/pi-steering-github",
+      { remote: "https://github.com/cad0p/pi-steering-github.git" },
+    );
+    assert.equal(await foreignRepoTarget(true, ctx), false);
+  });
+
+  it("BEHAVIOR DELTA (#34): glued member wins over earlier attached alias", async () => {
+    // Mirror direction: trailing glued `-Rcad0p/other` overrides the
+    // earlier attached `--repo=` own-repo value → foreign → fire.
+    const ctx = ctxWith(
+      "gh --repo=cad0p/pi-steering-github pr merge -Rcad0p/other",
+      { remote: "https://github.com/cad0p/pi-steering-github.git" },
+    );
+    assert.equal(await foreignRepoTarget(true, ctx), true);
+  });
+
+  it("fails closed: glued occurrence then trailing valueless -R", async () => {
+    // #34 semantics are form-agnostic: the trailing BARE `-R` is the
+    // last occurrence → exact-match valueless → null, NO fallback to
+    // the overridden glued value → fire.
+    const ctx = ctxWith("gh -Rcad0p/pi-steering-github pr merge -R", {
+      remote: "https://github.com/cad0p/pi-steering-github.git",
+    });
+    assert.equal(await foreignRepoTarget(true, ctx), true);
+  });
+
+  it("releases glued slashless -Rupstream (fork remote-name form)", async () => {
+    // Glued short form of the slashless remote-name flow: `-Rupstream`
+    // resolves to `upstream` → no `/` → step-4 release.
+    const ctx = ctxWith("gh -Rupstream pr merge", {
+      remote: "https://github.com/cad0p/pi-steering-github.git",
+    });
+    assert.equal(await foreignRepoTarget(true, ctx), false);
+  });
+
+  it("fails closed on empty attached short-form value -R=", async () => {
+    // Attached branch outranks glued: `-R=` matches the `-R=` prefix
+    // → value "" (NOT a glued decomposition of letter R) → step-3
+    // fail-close. gh errors on an empty repo anyway.
+    const ctx = ctxWith("gh -Rcad0p/pi-steering-github pr merge -R=", {
+      remote: "https://github.com/cad0p/pi-steering-github.git",
+    });
+    assert.equal(await foreignRepoTarget(true, ctx), true);
+  });
+
+  it("accepted limitation: slashless lookalike value word releases via step 4", async () => {
+    // Declaring ["R"] decomposes ANY `-R<rest>` word at any position:
+    // a quoted body value like `-m "-Rebased onto main"` (walker keeps
+    // it one word; the helper's space-split below approximates it)
+    // hijacks resolution to the slashless target "ebased" → step-4
+    // RELEASE — so a body word can never cause a false block. (It can
+    // MASK a real foreign target behind it — heuristic discipline,
+    // same class as the fork→upstream tolerance.)
+    const ctx = ctxWith("gh -Rcad0p/other pr edit 46 -m -Rebased onto main", {
+      remote: "https://github.com/cad0p/pi-steering-github.git",
+    });
+    assert.equal(await foreignRepoTarget(true, ctx), false);
+  });
+
+  it("accepted limitation: slashful lookalike value word over-blocks", async () => {
+    // The dangerous twin of the pin above: a SLASHFUL body value
+    // (`-m "-Rfoo/bar ref"`) hijacks resolution to `foo/bar` →
+    // basename mismatch → FIRE despite the leading own-repo target.
+    // Fail-closed direction, accepted under the ShellCheck-norm
+    // opt-in contract (flags#11 semantics 1+4).
+    const ctx = ctxWith(
+      "gh -Rcad0p/pi-steering-github pr edit 46 -m -Rfoo/bar ref",
+      {
+        remote: "https://github.com/cad0p/pi-steering-github.git",
+      },
+    );
     assert.equal(await foreignRepoTarget(true, ctx), true);
   });
 

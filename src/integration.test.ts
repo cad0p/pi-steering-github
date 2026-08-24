@@ -805,6 +805,31 @@ describe("github plugin — gh-repo-flag-before-subcommand (-R foreign-target ga
     assert.equal(rule, "gh-repo-flag-before-subcommand");
   });
 
+  it("glue-aware: own-repo -Rcad0p/x short form releases (flags#11 adoption)", async () => {
+    // The walker keeps `-Rcad0p/Goldmine` as ONE word; glue-aware
+    // target resolution (`{ gluedShorts: ["R"] }`, upstream
+    // cad0p/pi-steering-flags#11) now sees it → basename equality →
+    // allow. Pre-adoption this fail-closed on the unresolvable target
+    // (accepted over-block, pinned as a BEHAVIOR DELTA then).
+    const { block, rule } = await evaluateBash(
+      makeFixtureDir(),
+      "gh -Rcad0p/Goldmine pr create --title t",
+    );
+    assert.equal(block, false, `expected allow, got block by ${rule}`);
+  });
+
+  it("glue-aware: foreign -Rcad0p/x short form blocks", async () => {
+    // Glue awareness cuts both ways: a FOREIGN owner/repo in glued
+    // short form resolves instead of fail-closing on null → basename
+    // mismatch → block.
+    const { block, rule } = await evaluateBash(
+      makeFixtureDir(),
+      "gh -Rcad0p/other-repo issue create --title t",
+    );
+    assert.equal(block, true, "expected block");
+    assert.equal(rule, "gh-repo-flag-before-subcommand");
+  });
+
   it("allows the fork→upstream flow (target basename == cwd repo basename)", async () => {
     // `gh -R upstream/Goldmine pr create` from inside the
     // `cad0p/Goldmine` clone — the most common legit `-R` use.
