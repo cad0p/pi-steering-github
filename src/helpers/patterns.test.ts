@@ -178,6 +178,11 @@ describe("github plugin — gh-repo-flag-before-subcommand (normalized form)", (
     // shape carrying more pairs; pinned so it can't change silently.
     assert.equal(blocked(REPO_FLAG_ANCHOR, "gh -F - pr create"), false);
     assert.equal(blocked(REPO_FLAG_ANCHOR, "gh --opt - pr merge"), false);
+    // The bare-dash unrouted class holds at ANY pair boundary — a
+    // lone `-` between pairs kills routing for the whole tail (the
+    // pair after it can't start). Accepted cost of the guard; `-`
+    // alone is not a valid gh flag, so nothing real escapes.
+    assert.equal(blocked(REPO_FLAG_ANCHOR, "gh -R cad0p/x - pr merge"), false);
     // Dash-LED values are fine — they classify as another flag token:
     assert.equal(
       blocked(REPO_FLAG_ANCHOR, "gh --cooldown -5 -R x/y pr create"),

@@ -529,6 +529,12 @@ describe("github plugin — PR rules (issue-link + vault body-file policy)", () 
       `gh pr merge --version`,
       `gh pr merge --squash --help`,
       `gh pr merge --help --squash`,
+      // Flag-first shapes (#41): the carve-out leaves are argv-token
+      // based, so they fire regardless of leading-flag position —
+      // routed by the gate (released: no -R) or straight to this
+      // rule via its widened anchor, either way a clean allow.
+      `gh -v pr merge --help`,
+      `gh --hostname h pr merge --squash -h`,
     ]) {
       const { block, rule } = await evaluateBash(makeFixtureDir(), cmd, host);
       assert.equal(

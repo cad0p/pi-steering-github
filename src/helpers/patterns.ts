@@ -63,9 +63,13 @@ export const BODY_WITH_REF = flagValueWithRef("--body", "-b");
  * count on non-matches (measured catastrophic backtracking, ~17s at
  * 40 tokens), and a per-anchor re-derivation would eventually ship
  * the bare star somewhere. Accepted cost: a BARE-dash value token
- * (`gh -F - pr create`) fits neither arm and stays unrouted. Zero
- * iterations = the classic subcommand-first match, so widening is
- * strictly additive.
+ * fits neither arm, at ANY pair boundary — directly before the
+ * subcommand (`gh -F - pr create`) or between pairs (`gh -R x/y -
+ * pr merge`) — and one lone `-` unrouts the WHOLE tail (foreign
+ * gate AND subcommand policies). Harmless in practice: `-` alone is
+ * not a valid gh flag, so nothing real executes. Zero iterations =
+ * the classic subcommand-first match, so widening is strictly
+ * additive.
  */
 const LEADING_FLAG_PAIRS = "(?:-[^\\s]+(?:\\s+[^\\s-][^\\s]*)?\\s+)*";
 
