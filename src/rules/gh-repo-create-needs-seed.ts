@@ -17,7 +17,10 @@
  * QUOTED flag value (e.g. `--description "see --license mit"`)
  * falsely exempts — the `(?:^|\s)` guard kills only GLUED
  * lookalikes; same value-region class as the PR_* patterns, and the
- * walker contract is the plugin's foundation.
+ * walker contract is the plugin's foundation. A FLAG-FIRST create
+ * (`gh -R x/y repo create foo`) also stays ungated: this anchor is
+ * deliberately NOT widened with `LEADING_FLAG_PAIRS` (#41 scope —
+ * no acceptance bullet covers it; candidate follow-up).
  *
  * Strict — no override (schema default).
  */

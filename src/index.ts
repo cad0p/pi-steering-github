@@ -125,8 +125,9 @@ declare global {
  * then the issue-link rule, then merge, then the issue body-file
  * rule, then `gh-repo-create-needs-seed` LAST — appended, never
  * reordered: its `^gh\s+repo\s` anchor cannot overlap the four
- * `^gh\s+(?:pr|issue)\s` anchors, so first-match routing is
- * unaffected.
+ * widened `pr|issue` anchors (#41 — their shared leading unit only
+ * consumes DASH-led flag tokens, so `repo` is never matchable by
+ * them), so first-match routing is unaffected.
  * Reordering for stylistic reasons changes which rule an agent sees
  * when several match; pinned via `src/index.test.ts` (roster order)
  * and asserted end-to-end in `src/integration.test.ts`.

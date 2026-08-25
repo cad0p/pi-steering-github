@@ -10,6 +10,9 @@
  * argument is additionally validated (see `missingVaultBodyFile`):
  * it must resolve to a real file inside a napkin vault under
  * `<repo>/issues/`. No keyword requirement (issues close nothing).
+ * The anchor matches ANY leading-flag position (#41, shared
+ * `LEADING_FLAG_PAIRS` unit) — a gate-released flag-first form lands
+ * here instead of bypassing the policy.
  *
  * Strict — no override (schema default).
  */

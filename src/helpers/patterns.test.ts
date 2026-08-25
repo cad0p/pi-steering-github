@@ -68,8 +68,8 @@ describe("github plugin — pattern constants", () => {
 
 describe("github plugin — gh-repo-flag-before-subcommand (normalized form)", () => {
   it("routes gated subcommands with ANY number of leading flag(+value) pairs", () => {
-    // Flag-first position: sole leading flag(+value), then a gated
-    // subcommand. Case-insensitive (`/i`): gh flags/subcommands are
+    // Classic flag-first position: one leading flag(+value), then a
+    // gated subcommand. Case-insensitive (`/i`): gh flags/subcommands are
     // lowercase by convention, but the anchor must not silently
     // un-anchor uppercase spellings.
     assert.equal(
@@ -273,6 +273,18 @@ describe("github plugin — command anchors (normalized form)", () => {
     assert.equal(blocked(PR_BODY_ANCHOR, "gh pr merge --squash"), false);
     assert.equal(blocked(PR_BODY_ANCHOR, "gh pr view 46"), false);
     assert.equal(blocked(PR_BODY_ANCHOR, "gh issue create --title x"), false);
+    // #41 widening: leading flag(+value) pairs route too — a form
+    // RELEASED by the foreign gate must LAND on this policy, not
+    // bypass it (the one-pair class had escaped since #39).
+    assert.equal(
+      blocked(PR_BODY_ANCHOR, "gh -R x/y pr create --title x"),
+      true,
+    );
+    assert.equal(
+      blocked(PR_BODY_ANCHOR, "gh --hostname h pr edit 46 --body x"),
+      true,
+    );
+    assert.equal(blocked(PR_BODY_ANCHOR, "gh -v -R x/y pr new x"), true);
   });
 
   it("pr-create-needs-issue-link anchors pr create/new only", () => {
@@ -280,12 +292,35 @@ describe("github plugin — command anchors (normalized form)", () => {
     assert.equal(blocked(PR_CREATE_ANCHOR, "gh pr new --title x"), true);
     assert.equal(blocked(PR_CREATE_ANCHOR, "gh pr edit 46 --title x"), false);
     assert.equal(blocked(PR_CREATE_ANCHOR, "gh pr merge --squash"), false);
+    // #41 widening (flag-first lands on the policy):
+    assert.equal(
+      blocked(PR_CREATE_ANCHOR, "gh -R x/y pr create --title t"),
+      true,
+    );
+    assert.equal(blocked(PR_CREATE_ANCHOR, "gh -v pr new x"), true);
+    // \b boundary survives the widening (subcommand spellings that
+    // merely PREFIX a gated verb never match).
+    assert.equal(
+      blocked(PR_CREATE_ANCHOR, "gh -R x/y pr created --title t"),
+      false,
+    );
   });
 
   it("pr-merge-needs-closing-keywords anchors pr merge only", () => {
     assert.equal(blocked(PR_MERGE_ANCHOR, "gh pr merge --squash"), true);
     assert.equal(blocked(PR_MERGE_ANCHOR, "gh pr create --title x"), false);
     assert.equal(blocked(PR_MERGE_ANCHOR, "gh pr view 46"), false);
+    // #41 widening (flag-first lands on the policy) + boundaries:
+    assert.equal(blocked(PR_MERGE_ANCHOR, "gh -R x/y pr merge --squash"), true);
+    assert.equal(
+      blocked(PR_MERGE_ANCHOR, "gh --hostname h pr merge --squash"),
+      true,
+    );
+    assert.equal(blocked(PR_MERGE_ANCHOR, "gh -v -R x/y pr merged"), false);
+    assert.equal(
+      blocked(PR_MERGE_ANCHOR, "echo gh -R x/y pr merge --squash"),
+      false,
+    );
   });
 
   it("issue-body-from-vault-file anchors issue create/edit only", () => {
@@ -294,6 +329,15 @@ describe("github plugin — command anchors (normalized form)", () => {
     assert.equal(blocked(ISSUE_BODY_ANCHOR, "gh issue close 29"), false);
     assert.equal(blocked(ISSUE_BODY_ANCHOR, "gh issue view 29"), false);
     assert.equal(blocked(ISSUE_BODY_ANCHOR, "gh pr create --title x"), false);
+    // #41 widening (flag-first lands on the policy):
+    assert.equal(
+      blocked(ISSUE_BODY_ANCHOR, "gh -R x/y issue create --title x"),
+      true,
+    );
+    assert.equal(
+      blocked(ISSUE_BODY_ANCHOR, "gh --hostname h issue edit 29 --body x"),
+      true,
+    );
   });
 
   it("gh-repo-create-needs-seed anchors repo create/new only (new is the alias)", () => {
@@ -303,6 +347,27 @@ describe("github plugin — command anchors (normalized form)", () => {
     assert.equal(blocked(REPO_CREATE_PATTERN, "gh repo clone x"), false);
     assert.equal(blocked(REPO_CREATE_PATTERN, "gh pr create --title x"), false);
     assert.equal(blocked(REPO_CREATE_PATTERN, "echo gh repo create x"), false);
+    // Deliberately NOT widened (#41 scope): flag-first repo-create
+    // shapes stay ungated by the seed rule — documented candidate
+    // follow-up.
+    assert.equal(
+      blocked(REPO_CREATE_PATTERN, "gh -R x/y repo create foo"),
+      false,
+    );
+  });
+
+  it("#41 overlap sanity: a two-pair foreign-target merge matches BOTH the router and the merge anchor", () => {
+    // Deliberate, documented overlap: correctness rests on roster
+    // order (the redirect rule fires FIRST for foreign targets) plus
+    // release fall-through (own/no-target commands land on THIS
+    // anchor's policy), not on anchor disjointness.
+    const cmd = "gh --hostname h -R x/y pr merge --squash";
+    assert.equal(blocked(REPO_FLAG_ANCHOR, cmd), true);
+    assert.equal(blocked(PR_MERGE_ANCHOR, cmd), true);
+    const cmdCreate = "gh -v -R x/y pr create --title t";
+    assert.equal(blocked(REPO_FLAG_ANCHOR, cmdCreate), true);
+    assert.equal(blocked(PR_BODY_ANCHOR, cmdCreate), true);
+    assert.equal(blocked(PR_CREATE_ANCHOR, cmdCreate), true);
   });
 
   it("does not fire on non-gh basenames (echo …)", () => {

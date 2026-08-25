@@ -13,6 +13,10 @@
  * file inside a napkin vault under `<repo>/prs/`. The
  * closing-keyword content check belongs to `pr-create-needs-issue-link`.
  *
+ * The anchor matches ANY leading-flag position (#41, shared
+ * `LEADING_FLAG_PAIRS` unit): pre-widening, a flag-first form released
+ * by the foreign gate bypassed this policy entirely; now it lands here.
+ *
  * Strict — no override (schema default).
  */
 

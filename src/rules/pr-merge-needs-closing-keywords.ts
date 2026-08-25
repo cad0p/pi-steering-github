@@ -22,6 +22,11 @@
  *   `--subject`/`-t` aliases; absent, valueless, or non-matching →
  *   fires (fail-closed).
  *
+ * The anchor matches ANY leading-flag position (#41, shared
+ * `LEADING_FLAG_PAIRS` unit) — a gate-released flag-first merge lands
+ * on this policy instead of bypassing it (the one-pair class had
+ * escaped since #39).
+ *
  * See those predicates' docs for the full semantics and the accepted
  * exact-quoted-info-token limitation.
  *

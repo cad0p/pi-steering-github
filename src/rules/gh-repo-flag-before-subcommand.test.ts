@@ -295,17 +295,21 @@ describe("github plugin — gh-repo-flag-before-subcommand composed gate (engine
     assert.equal(block, false, `expected allow, got block by ${rule}`);
   });
 
-  it("glue-aware: own-repo -Rcad0p/x releases, foreign blocks (e2e)", async () => {
+  it("glue-aware: own-repo -Rcad0p/x RELEASES into the merge policy, foreign blocks (e2e)", async () => {
     // Upstream cad0p/pi-steering-flags#11 adoption (`{ gluedShorts:
     // ["R"] }`): the walker keeps `-Rcad0p/…` as ONE word and target
-    // resolution now sees it — own repo basename-matches → allow
-    // (the pre-adoption fail-closed over-block is gone); foreign
-    // owner/repo → block.
+    // resolution now sees it — own repo basename-matches → the gate
+    // releases (#41: the released command LANDS on
+    // pr-merge-needs-closing-keywords — no --subject here, so THAT
+    // policy blocks; pre-#41-widening this was a clean allow, i.e. a
+    // subject-policy bypass); foreign owner/repo → block by the
+    // redirect.
     const own = await evaluateBash(
       makeFixtureDir(),
       "gh -Rcad0p/pi-steering-github pr merge --squash",
     );
-    assert.equal(own.block, false, `expected allow, got block by ${own.rule}`);
+    assert.equal(own.block, true, `expected block, got allow`);
+    assert.equal(own.rule, "pr-merge-needs-closing-keywords");
     const foreign = await evaluateBash(
       makeFixtureDir(),
       "gh -Rcad0p/other pr merge --squash",
