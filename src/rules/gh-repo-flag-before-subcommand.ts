@@ -18,7 +18,10 @@
  *
  * Fires on `pr create|new|edit|merge` and `issue create|edit` only
  * (`repo create|new` is excluded by design — nothing to cd into, the
- * target is the positional argument; read-only forms stay allowed).
+ * target is the positional argument; that exclusion is about THIS
+ * foreign gate only and is NOT a policy bypass: the seed rule's
+ * widened anchor gates repo-create forms. Read-only forms stay
+ * allowed).
  * The anchor is a shape router; repo-targeting is decided by
  * PRESENCE of `-R/--repo` (#39): absent → release (fall-through);
  * present-but-unparsable → fail-closed block; slashless `-R upstream`

@@ -17,10 +17,14 @@
  * QUOTED flag value (e.g. `--description "see --license mit"`)
  * falsely exempts — the `(?:^|\s)` guard kills only GLUED
  * lookalikes; same value-region class as the PR_* patterns, and the
- * walker contract is the plugin's foundation. A FLAG-FIRST create
- * (`gh -R x/y repo create foo`) also stays ungated: this anchor is
- * deliberately NOT widened with `LEADING_FLAG_PAIRS` (#41 scope —
- * no acceptance bullet covers it; candidate follow-up).
+ * walker contract is the plugin's foundation.
+ *
+ * The anchor matches ANY leading-flag position (#41, shared
+ * `LEADING_FLAG_PAIRS` unit — consistency with the other `^gh\s+`
+ * anchors and closure of the flag-first bare-create escape).
+ * Because the widened anchor consumes leading flags, the exemption
+ * scan in `REPO_CREATE_PATTERN` runs over the WHOLE command (front
+ * negative lookahead) — see there.
  *
  * Strict — no override (schema default).
  */

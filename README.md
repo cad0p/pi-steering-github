@@ -168,7 +168,7 @@ gh repo create cad0p/<name> --add-readme
 
 The seed commit is the PR's base — the PR diff replaces it, so the first content is reviewed.
 
-Non-seed flags (`--source`, `--push`, `--clone`, `--description`, `--public|--private`, `--remote`, `--team`, …) do **not** exempt: `gh repo create x --source . --push` is blocked too — only a seed flag lets the command through. The rule is a form check (like the body-file rules); gh's own flag validation governs seed/`--source` combos at runtime.
+Non-seed flags (`--source`, `--push`, `--clone`, `--description`, `--public|--private`, `--remote`, `--team`, …) do **not** exempt: `gh repo create x --source . --push` is blocked too — only a seed flag lets the command through. The rule is a form check (like the body-file rules); gh's own flag validation governs seed/`--source` combos at runtime. Since #41 the anchor covers ANY number of leading flag(+value) pairs (`gh -v --hostname h repo create foo` is gated; `gh -g repo create foo` passes — seed flags count anywhere in the command), closing the flag-first bare-create escape.
 
 ## Predicates
 
@@ -220,8 +220,7 @@ The pattern constants (`CLOSING_KEYWORD`, `ISSUE_REF`, `TITLE_WITH_REF`, `SUBJEC
 - **Exact quoted info tokens**: `isInfoOnly` intentionally removes shell quotes before checking exact argv tokens. Consequently, `--subject "--help"` and `--subject "--version"` are indistinguishable from bare info-only flags and are released; surrounding text such as `"see --help"` and `"see --version"` remains blocked.
 - **Quoted-value false exemption (`gh-repo-create-needs-seed`)**: a seed-looking token inside a QUOTED flag value (e.g. `--description "see --license mit"`) falsely exempts the command — the token guard kills only GLUED lookalikes (`-local`, `foo--add-readme`), not space-separated tokens inside quoted values. Deliberately exploitable: an agent could embed a fake seed mention and still birth an empty repo. Accepted — same value-region class as the PR_* patterns; the walker contract is the plugin's foundation.
 - **Slashless `-R <remote>`** (remote-name form, no `/`) routes to the rule but is released by the `foreignRepoTarget` predicate (no `/` → not a foreign owner/repo redirect). Post-#41 the released command then lands on its per-subcommand policy (`gh -R upstream pr create --title t` is caught by the vault-body rule); the fork→upstream flow itself is unaffected when those policies are satisfied.
-- **`-R x/y repo create` stays ungated** by the redirect (the repo doesn't exist yet — nothing to cd into; `repo create` never needs `-R` since the target is the positional argument, and the seed rule gates the actual create form).
-- **Flag-first `repo create` stays ungated by the seed rule**: the seed anchor is deliberately not widened with the #41 leading-flag unit (no acceptance bullet covers it) — `gh -v repo create x` escapes the empty-repo gate. Candidate follow-up; subcommand-first creates remain fully gated.
+- **`-R x/y repo create` stays ungated** by the redirect (the repo doesn't exist yet — nothing to cd into). That exclusion is about the foreign gate only: since #41 the seed rule's widened anchor gates bare creates in any leading-flag position.
 - **`-R`-prefixed VALUE words** (the glue-awareness trade-off): declaring `{ gluedShorts: ["R"] }` makes ANY `-R<rest>` word resolvable at any position — a quoted body value like `-m "-Rfoo/bar ref"` can hijack target resolution → fail-closed over-block; slashless lookalikes (`"-Rebased onto main"`) resolve to slashless targets and release via the fork-flow step. Opt-in contract per ShellCheck-norm gluing rules: upstream cad0p/pi-steering-flags#11 (shipped `0.1.1-20260824.0`).
 
 ## License

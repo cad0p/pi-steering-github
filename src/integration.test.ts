@@ -778,6 +778,48 @@ describe("github plugin — gh-repo-create-needs-seed (repo create must seed)", 
     );
     assert.equal(block, false, `expected allow, got block by ${rule}`);
   });
+
+  it("#41: multi-pair flag-first bare create blocks BY the seed rule", async () => {
+    // Pre-widening this escaped the empty-repo gate entirely (no
+    // anchor matched between gh and repo). The redirect router still
+    // EXCLUDES repo create (nothing to cd into) — the seed rule is
+    // what catches it now.
+    const { block, rule } = await evaluateBash(
+      makeFixtureDir(),
+      "gh --hostname h repo create foo",
+    );
+    assert.equal(block, true, "expected block");
+    assert.equal(rule, "gh-repo-create-needs-seed");
+    const onePair = await evaluateBash(
+      makeFixtureDir(),
+      "gh -v repo create foo",
+    );
+    assert.equal(onePair.block, true, "expected block");
+    assert.equal(onePair.rule, "gh-repo-create-needs-seed");
+  });
+
+  it("#41: seeded flag-first create passes the gate cleanly", async () => {
+    // Same shape, seed flag present → the whole-command exemption
+    // scan releases it; nothing else matches → clean allow.
+    const { block, rule } = await evaluateBash(
+      makeFixtureDir(),
+      "gh --hostname h repo create foo --add-readme",
+    );
+    assert.equal(block, false, `expected allow, got block by ${rule}`);
+  });
+
+  it("#41: -R x/y repo create escapes the REDIRECT but not the seed gate", async () => {
+    // Orthogonality pin: REPO_FLAG_ANCHOR deliberately excludes repo
+    // create (foreign gate — nothing to cd into yet), but that
+    // exclusion is NOT a policy bypass: the seed rule's widened
+    // anchor catches the bare create.
+    const { block, rule } = await evaluateBash(
+      makeFixtureDir(),
+      "gh -R x/y repo create foo",
+    );
+    assert.equal(block, true, "expected block");
+    assert.equal(rule, "gh-repo-create-needs-seed");
+  });
 });
 
 describe("github plugin — gh-repo-flag-before-subcommand (-R foreign-target gate)", () => {

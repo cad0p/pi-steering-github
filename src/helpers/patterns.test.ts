@@ -347,11 +347,41 @@ describe("github plugin — command anchors (normalized form)", () => {
     assert.equal(blocked(REPO_CREATE_PATTERN, "gh repo clone x"), false);
     assert.equal(blocked(REPO_CREATE_PATTERN, "gh pr create --title x"), false);
     assert.equal(blocked(REPO_CREATE_PATTERN, "echo gh repo create x"), false);
-    // Deliberately NOT widened (#41 scope): flag-first repo-create
-    // shapes stay ungated by the seed rule — documented candidate
-    // follow-up.
+    // #41 widening: the seed gate covers flag-first creates too — a
+    // bare one (no seed anywhere) blocks regardless of leading pairs…
     assert.equal(
       blocked(REPO_CREATE_PATTERN, "gh -R x/y repo create foo"),
+      true,
+    );
+    assert.equal(
+      blocked(REPO_CREATE_PATTERN, "gh --hostname h repo create foo"),
+      true,
+    );
+    // …and a seeded flag-first create passes: seed flags AFTER the
+    // subcommand are seen by the whole-command exemption scan.
+    assert.equal(
+      blocked(
+        REPO_CREATE_PATTERN,
+        "gh -v --hostname h repo create foo --add-readme",
+      ),
+      false,
+    );
+    // Seed flags BEFORE the subcommand count too — the widened anchor
+    // consumes them, which is why REPO_CREATE_PATTERN's lookahead
+    // scans from the START (a trailing scan would over-block these).
+    assert.equal(blocked(REPO_CREATE_PATTERN, "gh -g repo create foo"), false);
+    assert.equal(
+      blocked(REPO_CREATE_PATTERN, "gh --template p/repo repo create x"),
+      false,
+    );
+    // Quoted-value false-exemption quirk unchanged (accepted): the
+    // seed token inside a QUOTED value still exempts at the string
+    // level — token guard kills only GLUED lookalikes.
+    assert.equal(
+      blocked(
+        REPO_CREATE_PATTERN,
+        'gh repo create x --description "see --license mit"',
+      ),
       false,
     );
   });

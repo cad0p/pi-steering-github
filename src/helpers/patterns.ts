@@ -129,13 +129,20 @@ export const ISSUE_BODY_ANCHOR = new RegExp(
 
 /**
  * `gh-repo-create-needs-seed` anchor: repo create/new (new is the gh
- * alias). Deliberately NOT widened with `LEADING_FLAG_PAIRS` (#41
- * scope: no acceptance bullet covers flag-first repo-create shapes —
- * the target is the positional argument, so a leading `-R` there is
- * meaningless anyway); a flag-first `repo create` remains ungated by
- * the seed rule — candidate follow-up, noted under Known limitations.
+ * alias), in ANY leading-flag position — #41 widened with
+ * `LEADING_FLAG_PAIRS` like every other `^gh\s+` anchor: consistency
+ * across the anchor family, and a flag-first bare create (`gh -v
+ * --hostname h repo create foo`) previously escaped the empty-repo
+ * gate entirely. NOTE for `REPO_CREATE_PATTERN`'s derivation below:
+ * because this anchor CONSUMES leading flags, its seed-exemption scan
+ * must cover the WHOLE command — see the front-position negative
+ * lookahead there (a trailing one would be blind to seed flags the
+ * pairs unit ate, over-blocking `gh -g repo create foo`).
  */
-export const REPO_CREATE_ANCHOR = /^gh\s+repo\s+(?:create|new)\b/i;
+export const REPO_CREATE_ANCHOR = new RegExp(
+  `^gh\\s+${LEADING_FLAG_PAIRS}repo\\s+(?:create|new)\\b`,
+  "i",
+);
 
 /**
  * `gh-repo-flag-before-subcommand` pattern: a SHAPE ROUTER — a gated
@@ -163,7 +170,8 @@ export const REPO_CREATE_ANCHOR = /^gh\s+repo\s+(?:create|new)\b/i;
  * Greedy value consumption always backtracks until the tail matches,
  * so extra leading flags never mask a routable tail (`gh -t pr
  * merge` still routes — pinned). Anchored `^gh\s` (no `echo gh …`).
- * `repo create|new` is excluded by design; read-only `pr view`/
+ * `repo create|new` is excluded by design (the seed rule owns that
+ * gate); read-only `pr view`/
  * `issue list` never route. See the rule doc comment.
  */
 export const REPO_FLAG_ANCHOR = new RegExp(
@@ -181,10 +189,18 @@ export const REPO_CREATE_SEED_FLAG =
 
 /**
  * Fires unless a seed flag token appears anywhere in the command.
- * Derived from `REPO_CREATE_ANCHOR` (its `source` + the `i` flag) so
- * the anchor constant can never drift from the shipped pattern.
+ * Derived from `REPO_CREATE_ANCHOR` (its `source`, same `i` flag) so
+ * the anchor constant can never drift from the shipped pattern. The
+ * seed-exemption lookahead sits BEFORE the anchor — scanning the
+ * whole command — because the widened anchor consumes leading flags:
+ * a TRAILING lookahead would only see tokens after `repo create`
+ * and wrongly block seeded flag-first creates (`gh -g repo create
+ * foo`). For subcommand-first commands (every pre-#41 input) the two
+ * compositions are verdict-identical: nothing but whitespace can sit
+ * between `gh` and `repo` there, so all flags were always in scan
+ * range.
  */
 export const REPO_CREATE_PATTERN = new RegExp(
-  `${REPO_CREATE_ANCHOR.source}(?![\\s\\S]*${REPO_CREATE_SEED_FLAG})`,
+  `^(?![\\s\\S]*${REPO_CREATE_SEED_FLAG})${REPO_CREATE_ANCHOR.source}`,
   "i",
 );
