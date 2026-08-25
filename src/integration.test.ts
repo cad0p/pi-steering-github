@@ -890,6 +890,49 @@ describe("github plugin — gh-repo-flag-before-subcommand (-R foreign-target ga
     assert.equal(rule, "gh-repo-flag-before-subcommand");
   });
 
+  it("#41: TWO leading flag pairs route — a foreign target blocks BY this rule", async () => {
+    // Pre-#41 this shape escaped the router entirely (one-pair cap):
+    // `--hostname h -R …` is two flag(+value) pairs. The redirect
+    // masks the closing-keywords allowance as usual (first-fires-wins).
+    const { block, rule } = await evaluateBash(
+      makeFixtureDir(),
+      'gh --hostname h -R cad0p/other-repo pr merge --subject "feat: x (closes #12)"',
+    );
+    assert.equal(block, true, "expected block");
+    assert.equal(rule, "gh-repo-flag-before-subcommand");
+  });
+
+  it("#41: two leading flag pairs with an OWN-repo target RELEASE", async () => {
+    // Fixture cwd repo basename is cad0p/Goldmine (default host
+    // remote). Same shape as the foreign twin below — routed by the
+    // widened anchor, then released by the predicate on the basename
+    // match. The foreign twin proves the shape genuinely routes (a
+    // clean allow alone couldn't distinguish release from exemption).
+    const own = await evaluateBash(
+      makeFixtureDir(),
+      "gh --hostname h -R cad0p/Goldmine pr merge --squash",
+    );
+    assert.equal(own.block, false, `expected allow, got block by ${own.rule}`);
+    const foreign = await evaluateBash(
+      makeFixtureDir(),
+      "gh --hostname h -R cad0p/other-repo pr merge --squash",
+    );
+    assert.equal(foreign.block, true, "expected block");
+    assert.equal(foreign.rule, "gh-repo-flag-before-subcommand");
+  });
+
+  it("#41: multi-flag command without -R anywhere routes but releases untouched", async () => {
+    // Routed by the unbounded anchor; absent repo flag → predicate
+    // releases. The per-subcommand anchors are ^gh\s+(pr|issue), so a
+    // flag-first form falls PAST them — release surfaces as a clean
+    // byte-for-byte allow rather than a downstream block.
+    const { block, rule } = await evaluateBash(
+      makeFixtureDir(),
+      "gh -v --hostname h pr merge --squash",
+    );
+    assert.equal(block, false, `expected allow, got block by ${rule}`);
+  });
+
   it("fall-through: no-flag mutations reach the per-subcommand rules", async () => {
     // `gh pr merge --squash` ROUTES the foreign gate first since #39
     // (zero leading flags) but carries NO repo flag → predicate

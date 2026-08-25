@@ -84,27 +84,43 @@ export const REPO_CREATE_ANCHOR = /^gh\s+repo\s+(?:create|new)\b/i;
 
 /**
  * `gh-repo-flag-before-subcommand` pattern: a SHAPE ROUTER — a gated
- * `pr create|new|edit|merge` or `issue create|edit` with ZERO or ONE
- * leading flag token (the optional group covers `gh pr merge …` AND
- * `gh -R x/y pr merge …`; two leading flags stay unrouted). It only
- * decides "is this a gated subcommand shape?" — whether the command
- * REPO-TARGETS is decided by the `foreignRepoTarget` predicate's
- * `-R/--repo` PRESENCE check on the walker argv (#39: presence, not
- * position — subcommand-first `-R x/y pr merge` routes since the
- * widening), via `@cad0p/pi-steering-flags`' `hasFlag`/`getFlagValue`
- * (arg layer, quote-aware). Commands without any `-R/--repo` route
- * but are RELEASED by the predicate and fall through to the
- * per-subcommand rules — the widened anchor deliberately OVERLAPS the
- * PR/issue body/create/merge anchors, and correctness rests on the
- * evaluator's first-firing-rule-wins ordering plus that release
- * fall-through, not on anchor disjointness. Slashless `-R upstream`
- * routes too (fork remote-name form → released by the predicate).
+ * `pr create|new|edit|merge` or `issue create|edit` preceded by ANY
+ * number of leading flag(+value) pairs (#41 lifted the one-pair cap:
+ * zero pairs = subcommand-first, one pair = flag-first, N pairs =
+ * newly routed). The star is GUARDED on purpose: a pair's value arm
+ * (`[^\s-][^\s]*` — must not start with `-`) makes every dash-led
+ * argv token classify as exactly one flag, so non-match evaluation
+ * stays LINEAR-time; an unguarded value arm (`[^\s]+`) lets every
+ * extra dash-token double the branch count on non-matches — measured
+ * catastrophic backtracking (~17s at 40 tokens), a pasted compound
+ * line would stall the evaluator. Accepted cost: a BARE-dash value
+ * token (`gh -F - pr create`) fits neither arm and stays unrouted —
+ * the one scoped delta vs the old unguarded one-pair anchor (which
+ * ate `-` as a value); shapes carrying `-R/--repo` further out were
+ * already beyond the old single-pair reach, so only the
+ * bare-dash-directly-before-the-subcommand class flips, and without
+ * a repo flag the predicate releases such commands identically. It
+ * only decides "is this a gated subcommand shape?" — whether the
+ * command REPO-TARGETS is decided by the `foreignRepoTarget`
+ * predicate's `-R/--repo` PRESENCE check on the walker argv (#39:
+ * presence, not position — subcommand-first `-R x/y pr merge` routes
+ * since the widening), via `@cad0p/pi-steering-flags`'
+ * `hasFlag`/`getFlagValue` (arg layer, quote-aware). Commands
+ * without any `-R/--repo` route but are RELEASED by the predicate
+ * and fall through to the per-subcommand rules — the widened anchor
+ * deliberately OVERLAPS the PR/issue body/create/merge anchors, and
+ * correctness rests on the evaluator's first-firing-rule-wins
+ * ordering plus that release fall-through, not on anchor
+ * disjointness. Slashless `-R upstream` routes too (fork remote-name
+ * form → released by the predicate). Greedy value consumption always
+ * backtracks until the tail matches, so extra leading flags never
+ * mask a routable tail (`gh -t pr merge` still routes — pinned).
  * Anchored `^gh\s` (no `echo gh …`). `repo create|new` is excluded
  * by design; read-only `pr view`/`issue list` never route. See the
  * rule doc comment.
  */
 export const REPO_FLAG_ANCHOR =
-  /^gh\s+(?:-[^\s]+(?:\s+[^\s]+)?\s+)?(?:pr\s+(?:create|new|edit|merge)|issue\s+(?:create|edit))\b/i;
+  /^gh\s+(?:-[^\s]+(?:\s+[^\s-][^\s]*)?\s+)*(?:pr\s+(?:create|new|edit|merge)|issue\s+(?:create|edit))\b/i;
 
 /**
  * A seed flag as its own token: long or short form, ` ` or `=`

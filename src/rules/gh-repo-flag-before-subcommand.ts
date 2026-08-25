@@ -8,8 +8,9 @@
  * maintainer loop until good, then cd into the foreign repo and
  * target it from there. This is the ENTRY step of the foreign flow —
  * FIRST in the roster: its router anchor OVERLAPS the pr/issue
- * body/create/merge anchors (it routes gated subcommands with zero
- * or one leading flag — both `-R` positions, #39), so correctness
+ * body/create/merge anchors (it routes gated subcommands with any
+ * number of leading flag(+value) pairs — both `-R` positions, #39;
+ * unbounded pair count, #41), so correctness
  * rests on the evaluator's first-firing-rule-wins ordering plus
  * RELEASE FALL-THROUGH — the `foreignRepoTarget` predicate releases
  * every command without a foreign target and the per-subcommand
