@@ -18,6 +18,7 @@
  */
 
 import assert from "node:assert/strict";
+import { performance } from "node:perf_hooks";
 import { describe, it } from "node:test";
 import { ghRepoCreateNeedsSeed } from "../rules/gh-repo-create-needs-seed.ts";
 import { issueBodyFromVaultFile } from "../rules/issue-body-from-vault-file.ts";
@@ -66,9 +67,9 @@ describe("github plugin — pattern constants", () => {
 });
 
 describe("github plugin — gh-repo-flag-before-subcommand (normalized form)", () => {
-  it("routes gated subcommands with zero or one leading flag (both -R positions)", () => {
-    // Flag-first position: sole leading flag(+value), then a gated
-    // subcommand. Case-insensitive (`/i`): gh flags/subcommands are
+  it("routes gated subcommands with ANY number of leading flag(+value) pairs", () => {
+    // Classic flag-first position: one leading flag(+value), then a
+    // gated subcommand. Case-insensitive (`/i`): gh flags/subcommands are
     // lowercase by convention, but the anchor must not silently
     // un-anchor uppercase spellings.
     assert.equal(
@@ -121,9 +122,75 @@ describe("github plugin — gh-repo-flag-before-subcommand (normalized form)", (
     );
     // One leading flag WITHOUT a trailing value token still routes.
     assert.equal(blocked(REPO_FLAG_ANCHOR, "gh -v pr merge --squash"), true);
+    // Multi-pair shapes (#41): the star lifts the one-pair cap — the
+    // two-leading-flag under-block (`gh --hostname h -R cad0p/x pr
+    // merge` escaped the foreign gate entirely) is closed.
+    assert.equal(
+      blocked(REPO_FLAG_ANCHOR, "gh --hostname h -R cad0p/x pr merge"),
+      true,
+    );
+    assert.equal(
+      blocked(
+        REPO_FLAG_ANCHOR,
+        "gh --verbose --repo=cad0p/x pr merge --squash",
+      ),
+      true,
+    );
+    // Cross-alias pairs: routing stays shape-only — WHICH target wins
+    // (`-R x` vs `--repo y/z`, last-wins) is predicate-level business.
+    assert.equal(
+      blocked(REPO_FLAG_ANCHOR, "gh -R x --repo=y/z pr merge"),
+      true,
+    );
+    assert.equal(
+      blocked(REPO_FLAG_ANCHOR, "gh -a -b v -c w -R cad0p/x issue edit 3"),
+      true,
+    );
   });
 
-  it("does not route read-only forms, excluded subcommands, echo prefixes, or two-leading-flag shapes", () => {
+  it("backtracking: greedy value consumption never masks a routable tail", () => {
+    // The value arm tries greedily and backtracks until the tail
+    // matches — extra leading flags can't swallow the subcommand.
+    assert.equal(blocked(REPO_FLAG_ANCHOR, "gh -t pr merge"), true);
+  });
+
+  it("linear time on non-matches: the [^\\s-] value-guard bars catastrophic backtracking (#41)", () => {
+    // An UNGUARDED star (`[^\s]+` value arm) doubles its branch count
+    // per dash-token on NON-matches — measured seconds at ~40 tokens;
+    // the guard keeps classification deterministic (~0.02ms at 200).
+    // The wall-clock bound pins that: a regression back to the bare
+    // star fails this long before any human notices sluggishness.
+    const cmd = `gh ${"-a ".repeat(200)}pr view`;
+    const t0 = performance.now();
+    const routed = blocked(REPO_FLAG_ANCHOR, cmd);
+    const elapsed = performance.now() - t0;
+    assert.equal(routed, false);
+    assert.ok(
+      elapsed < 50,
+      `non-match took ${elapsed.toFixed(1)}ms — anti-ReDoS value-guard regressed`,
+    );
+  });
+
+  it("bare-dash VALUE tokens stay unrouted under the guarded star (accepted #41 trade-off)", () => {
+    // A lone `-` starts neither arm: not the flag arm (needs a char
+    // after the dash) and not the guarded value arm (must not start
+    // with `-`). Same unroutability class as today's anchor for every
+    // shape carrying more pairs; pinned so it can't change silently.
+    assert.equal(blocked(REPO_FLAG_ANCHOR, "gh -F - pr create"), false);
+    assert.equal(blocked(REPO_FLAG_ANCHOR, "gh --opt - pr merge"), false);
+    // The bare-dash unrouted class holds at ANY pair boundary — a
+    // lone `-` between pairs kills routing for the whole tail (the
+    // pair after it can't start). Accepted cost of the guard; `-`
+    // alone is not a valid gh flag, so nothing real escapes.
+    assert.equal(blocked(REPO_FLAG_ANCHOR, "gh -R cad0p/x - pr merge"), false);
+    // Dash-LED values are fine — they classify as another flag token:
+    assert.equal(
+      blocked(REPO_FLAG_ANCHOR, "gh --cooldown -5 -R x/y pr create"),
+      true,
+    );
+  });
+
+  it("does not route read-only forms, excluded subcommands, or echo prefixes (even with multiple leading flags)", () => {
     assert.equal(blocked(REPO_FLAG_ANCHOR, "gh -R cad0p/x pr view 12"), false);
     assert.equal(blocked(REPO_FLAG_ANCHOR, "gh -R cad0p/x issue list"), false);
     assert.equal(
@@ -146,10 +213,21 @@ describe("github plugin — gh-repo-flag-before-subcommand (normalized form)", (
       blocked(REPO_FLAG_ANCHOR, "gh -R cad0p/x repo clone x"),
       false,
     );
-    // Documented boundary: TWO leading flags stay unrouted (the
-    // optional group covers zero or exactly one flag+value pair).
+    // #41 exclusions hold under multiple leading flags too.
     assert.equal(
-      blocked(REPO_FLAG_ANCHOR, "gh --hostname h -R cad0p/x pr merge"),
+      blocked(REPO_FLAG_ANCHOR, "echo gh -R a/b -v pr create --title t"),
+      false,
+    );
+    assert.equal(
+      blocked(REPO_FLAG_ANCHOR, "gh -v -R cad0p/x pr view 12"),
+      false,
+    );
+    assert.equal(
+      blocked(REPO_FLAG_ANCHOR, "gh -v -R cad0p/x issue list"),
+      false,
+    );
+    assert.equal(
+      blocked(REPO_FLAG_ANCHOR, "gh -v -R cad0p/x repo create foo"),
       false,
     );
   });
@@ -200,6 +278,18 @@ describe("github plugin — command anchors (normalized form)", () => {
     assert.equal(blocked(PR_BODY_ANCHOR, "gh pr merge --squash"), false);
     assert.equal(blocked(PR_BODY_ANCHOR, "gh pr view 46"), false);
     assert.equal(blocked(PR_BODY_ANCHOR, "gh issue create --title x"), false);
+    // #41 widening: leading flag(+value) pairs route too — a form
+    // RELEASED by the foreign gate must LAND on this policy, not
+    // bypass it (the one-pair class had escaped since #39).
+    assert.equal(
+      blocked(PR_BODY_ANCHOR, "gh -R x/y pr create --title x"),
+      true,
+    );
+    assert.equal(
+      blocked(PR_BODY_ANCHOR, "gh --hostname h pr edit 46 --body x"),
+      true,
+    );
+    assert.equal(blocked(PR_BODY_ANCHOR, "gh -v -R x/y pr new x"), true);
   });
 
   it("pr-create-needs-issue-link anchors pr create/new only", () => {
@@ -207,12 +297,35 @@ describe("github plugin — command anchors (normalized form)", () => {
     assert.equal(blocked(PR_CREATE_ANCHOR, "gh pr new --title x"), true);
     assert.equal(blocked(PR_CREATE_ANCHOR, "gh pr edit 46 --title x"), false);
     assert.equal(blocked(PR_CREATE_ANCHOR, "gh pr merge --squash"), false);
+    // #41 widening (flag-first lands on the policy):
+    assert.equal(
+      blocked(PR_CREATE_ANCHOR, "gh -R x/y pr create --title t"),
+      true,
+    );
+    assert.equal(blocked(PR_CREATE_ANCHOR, "gh -v pr new x"), true);
+    // \b boundary survives the widening (subcommand spellings that
+    // merely PREFIX a gated verb never match).
+    assert.equal(
+      blocked(PR_CREATE_ANCHOR, "gh -R x/y pr created --title t"),
+      false,
+    );
   });
 
   it("pr-merge-needs-closing-keywords anchors pr merge only", () => {
     assert.equal(blocked(PR_MERGE_ANCHOR, "gh pr merge --squash"), true);
     assert.equal(blocked(PR_MERGE_ANCHOR, "gh pr create --title x"), false);
     assert.equal(blocked(PR_MERGE_ANCHOR, "gh pr view 46"), false);
+    // #41 widening (flag-first lands on the policy) + boundaries:
+    assert.equal(blocked(PR_MERGE_ANCHOR, "gh -R x/y pr merge --squash"), true);
+    assert.equal(
+      blocked(PR_MERGE_ANCHOR, "gh --hostname h pr merge --squash"),
+      true,
+    );
+    assert.equal(blocked(PR_MERGE_ANCHOR, "gh -v -R x/y pr merged"), false);
+    assert.equal(
+      blocked(PR_MERGE_ANCHOR, "echo gh -R x/y pr merge --squash"),
+      false,
+    );
   });
 
   it("issue-body-from-vault-file anchors issue create/edit only", () => {
@@ -221,6 +334,15 @@ describe("github plugin — command anchors (normalized form)", () => {
     assert.equal(blocked(ISSUE_BODY_ANCHOR, "gh issue close 29"), false);
     assert.equal(blocked(ISSUE_BODY_ANCHOR, "gh issue view 29"), false);
     assert.equal(blocked(ISSUE_BODY_ANCHOR, "gh pr create --title x"), false);
+    // #41 widening (flag-first lands on the policy):
+    assert.equal(
+      blocked(ISSUE_BODY_ANCHOR, "gh -R x/y issue create --title x"),
+      true,
+    );
+    assert.equal(
+      blocked(ISSUE_BODY_ANCHOR, "gh --hostname h issue edit 29 --body x"),
+      true,
+    );
   });
 
   it("gh-repo-create-needs-seed anchors repo create/new only (new is the alias)", () => {
@@ -230,6 +352,57 @@ describe("github plugin — command anchors (normalized form)", () => {
     assert.equal(blocked(REPO_CREATE_PATTERN, "gh repo clone x"), false);
     assert.equal(blocked(REPO_CREATE_PATTERN, "gh pr create --title x"), false);
     assert.equal(blocked(REPO_CREATE_PATTERN, "echo gh repo create x"), false);
+    // #41 widening: the seed gate covers flag-first creates too — a
+    // bare one (no seed anywhere) blocks regardless of leading pairs…
+    assert.equal(
+      blocked(REPO_CREATE_PATTERN, "gh -R x/y repo create foo"),
+      true,
+    );
+    assert.equal(
+      blocked(REPO_CREATE_PATTERN, "gh --hostname h repo create foo"),
+      true,
+    );
+    // …and a seeded flag-first create passes: seed flags AFTER the
+    // subcommand are seen by the whole-command exemption scan.
+    assert.equal(
+      blocked(
+        REPO_CREATE_PATTERN,
+        "gh -v --hostname h repo create foo --add-readme",
+      ),
+      false,
+    );
+    // Seed flags BEFORE the subcommand count too — the widened anchor
+    // consumes them, which is why REPO_CREATE_PATTERN's lookahead
+    // scans from the START (a trailing scan would over-block these).
+    assert.equal(blocked(REPO_CREATE_PATTERN, "gh -g repo create foo"), false);
+    assert.equal(
+      blocked(REPO_CREATE_PATTERN, "gh --template p/repo repo create x"),
+      false,
+    );
+    // Quoted-value false-exemption quirk unchanged (accepted): the
+    // seed token inside a QUOTED value still exempts at the string
+    // level — token guard kills only GLUED lookalikes.
+    assert.equal(
+      blocked(
+        REPO_CREATE_PATTERN,
+        'gh repo create x --description "see --license mit"',
+      ),
+      false,
+    );
+  });
+
+  it("#41 overlap sanity: a two-pair foreign-target merge matches BOTH the router and the merge anchor", () => {
+    // Deliberate, documented overlap: correctness rests on roster
+    // order (the redirect rule fires FIRST for foreign targets) plus
+    // release fall-through (own/no-target commands land on THIS
+    // anchor's policy), not on anchor disjointness.
+    const cmd = "gh --hostname h -R x/y pr merge --squash";
+    assert.equal(blocked(REPO_FLAG_ANCHOR, cmd), true);
+    assert.equal(blocked(PR_MERGE_ANCHOR, cmd), true);
+    const cmdCreate = "gh -v -R x/y pr create --title t";
+    assert.equal(blocked(REPO_FLAG_ANCHOR, cmdCreate), true);
+    assert.equal(blocked(PR_BODY_ANCHOR, cmdCreate), true);
+    assert.equal(blocked(PR_CREATE_ANCHOR, cmdCreate), true);
   });
 
   it("does not fire on non-gh basenames (echo …)", () => {

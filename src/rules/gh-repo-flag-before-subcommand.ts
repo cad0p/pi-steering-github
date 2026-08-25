@@ -8,8 +8,9 @@
  * maintainer loop until good, then cd into the foreign repo and
  * target it from there. This is the ENTRY step of the foreign flow —
  * FIRST in the roster: its router anchor OVERLAPS the pr/issue
- * body/create/merge anchors (it routes gated subcommands with zero
- * or one leading flag — both `-R` positions, #39), so correctness
+ * body/create/merge anchors (it routes gated subcommands with any
+ * number of leading flag(+value) pairs — both `-R` positions, #39;
+ * unbounded pair count, #41), so correctness
  * rests on the evaluator's first-firing-rule-wins ordering plus
  * RELEASE FALL-THROUGH — the `foreignRepoTarget` predicate releases
  * every command without a foreign target and the per-subcommand
@@ -17,7 +18,10 @@
  *
  * Fires on `pr create|new|edit|merge` and `issue create|edit` only
  * (`repo create|new` is excluded by design — nothing to cd into, the
- * target is the positional argument; read-only forms stay allowed).
+ * target is the positional argument; that exclusion is about THIS
+ * foreign gate only and is NOT a policy bypass: the seed rule's
+ * widened anchor gates repo-create forms. Read-only forms stay
+ * allowed).
  * The anchor is a shape router; repo-targeting is decided by
  * PRESENCE of `-R/--repo` (#39): absent → release (fall-through);
  * present-but-unparsable → fail-closed block; slashless `-R upstream`

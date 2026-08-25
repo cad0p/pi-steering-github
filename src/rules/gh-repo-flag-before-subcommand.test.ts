@@ -3,8 +3,9 @@
 
 /**
  * `gh-repo-flag-before-subcommand` pins: the normalized-form anchor
- * surface (routes gated subcommands with zero or one leading flag —
- * both `-R` positions since #39), the declarative when-shape (no
+ * surface (routes gated subcommands with any number of leading
+ * flag(+value) pairs — both `-R` positions since #39, unbounded
+ * count since #41), the declarative when-shape (no
  * unless closure — the basename gate lives in the registered
  * `foreignRepoTarget` predicate, whose own unit tests live in
  * `../predicates/foreign-repo-target.test.ts`), the COMPOSED help
@@ -43,7 +44,7 @@ function blocked(pattern: string | RegExp, normalized: string): boolean {
 }
 
 describe("github plugin — gh-repo-flag-before-subcommand (normalized form)", () => {
-  it("routes gated commands in both flag positions (shape router)", () => {
+  it("routes gated commands in any flag position and count (shape router)", () => {
     // Flag-first position.
     assert.equal(
       blocked(REPO_FLAG_ANCHOR, "gh -R cad0p/x pr create --title t"),
@@ -91,6 +92,25 @@ describe("github plugin — gh-repo-flag-before-subcommand (normalized form)", (
       ),
       true,
     );
+    // Multi-pair shapes (#41): unbounded leading flag(+value) pairs —
+    // the two-leading-flag under-block is closed.
+    assert.equal(
+      blocked(REPO_FLAG_ANCHOR, "gh --hostname h -R cad0p/other pr merge"),
+      true,
+    );
+    assert.equal(
+      blocked(
+        REPO_FLAG_ANCHOR,
+        "gh --verbose --repo=cad0p/x pr merge --squash",
+      ),
+      true,
+    );
+    // Cross-alias pairs: shape-only routing; last-wins resolution is
+    // predicate-level (pinned there).
+    assert.equal(
+      blocked(REPO_FLAG_ANCHOR, "gh -R x --repo=y/z pr merge"),
+      true,
+    );
   });
 
   it("shape router also routes non-repo leading flags and slashless -R (the predicate releases them)", () => {
@@ -107,6 +127,12 @@ describe("github plugin — gh-repo-flag-before-subcommand (normalized form)", (
     );
     assert.equal(
       blocked(REPO_FLAG_ANCHOR, "gh -R upstream pr create --title t"),
+      true,
+    );
+    // Multiple non-repo leading flags route too (#41); the predicate
+    // releases them on absence.
+    assert.equal(
+      blocked(REPO_FLAG_ANCHOR, "gh -v --hostname h pr create --title t"),
       true,
     );
   });
@@ -269,17 +295,21 @@ describe("github plugin — gh-repo-flag-before-subcommand composed gate (engine
     assert.equal(block, false, `expected allow, got block by ${rule}`);
   });
 
-  it("glue-aware: own-repo -Rcad0p/x releases, foreign blocks (e2e)", async () => {
+  it("glue-aware: own-repo -Rcad0p/x RELEASES into the merge policy, foreign blocks (e2e)", async () => {
     // Upstream cad0p/pi-steering-flags#11 adoption (`{ gluedShorts:
     // ["R"] }`): the walker keeps `-Rcad0p/…` as ONE word and target
-    // resolution now sees it — own repo basename-matches → allow
-    // (the pre-adoption fail-closed over-block is gone); foreign
-    // owner/repo → block.
+    // resolution now sees it — own repo basename-matches → the gate
+    // releases (#41: the released command LANDS on
+    // pr-merge-needs-closing-keywords — no --subject here, so THAT
+    // policy blocks; pre-#41-widening this was a clean allow, i.e. a
+    // subject-policy bypass); foreign owner/repo → block by the
+    // redirect.
     const own = await evaluateBash(
       makeFixtureDir(),
       "gh -Rcad0p/pi-steering-github pr merge --squash",
     );
-    assert.equal(own.block, false, `expected allow, got block by ${own.rule}`);
+    assert.equal(own.block, true, `expected block, got allow`);
+    assert.equal(own.rule, "pr-merge-needs-closing-keywords");
     const foreign = await evaluateBash(
       makeFixtureDir(),
       "gh -Rcad0p/other pr merge --squash",

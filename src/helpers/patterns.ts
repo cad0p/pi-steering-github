@@ -52,15 +52,57 @@ export const SUBJECT_WITH_REF = flagValueWithRef("--subject", "-t");
 /** `--body|-b` value must hold the ref (create inline fallback). */
 export const BODY_WITH_REF = flagValueWithRef("--body", "-b");
 
-/** `pr-body-from-vault-file` anchor: pr create/new/edit. */
-export const PR_BODY_ANCHOR = /^gh\s+pr\s+(?:create|new|edit)\b/i;
-
-/** `pr-create-needs-issue-link` anchor: pr create/new. */
-export const PR_CREATE_ANCHOR = /^gh\s+pr\s+(?:create|new)\b/i;
+/**
+ * The guarded leading-flag unit shared by ALL widened anchors (#41):
+ * ANY number of leading flag(+value) pairs before a gated
+ * subcommand. Reusing ONE constant keeps the anti-ReDoS value-guard
+ * uniform — a pair's value arm (`[^\s-][^\s]*` — must not start
+ * with `-`) makes every dash-led argv token classify as exactly one
+ * flag, so non-match evaluation stays LINEAR-time; an unguarded
+ * value arm (`[^\s]+`) lets every extra dash-token double the branch
+ * count on non-matches (measured catastrophic backtracking, ~17s at
+ * 40 tokens), and a per-anchor re-derivation would eventually ship
+ * the bare star somewhere. Accepted cost: a BARE-dash value token
+ * fits neither arm, at ANY pair boundary — directly before the
+ * subcommand (`gh -F - pr create`) or between pairs (`gh -R x/y -
+ * pr merge`) — and one lone `-` unrouts the WHOLE tail (foreign
+ * gate AND subcommand policies). Harmless in practice: `-` alone is
+ * not a valid gh flag, so nothing real executes. Zero iterations =
+ * the classic subcommand-first match, so widening is strictly
+ * additive.
+ */
+const LEADING_FLAG_PAIRS = "(?:-[^\\s]+(?:\\s+[^\\s-][^\\s]*)?\\s+)*";
 
 /**
- * `pr-merge-needs-closing-keywords` anchor: pr merge only. Fires
- * unless the command carries a closing-keyword ref in the `--subject`
+ * `pr-body-from-vault-file` anchor: pr create/new/edit, in ANY
+ * leading-flag position (#41 widened with `LEADING_FLAG_PAIRS` —
+ * pre-widening, a flag-first form RELEASED by the foreign gate
+ * bypassed this policy entirely: no other anchor matched it; the
+ * one-pair class had escaped since #39). The `missingVaultBodyFile`
+ * leaf is argv-based (`findBodyFileValue` scans the whole walker
+ * argv), so leading flags never affect the verdict.
+ */
+export const PR_BODY_ANCHOR = new RegExp(
+  `^gh\\s+${LEADING_FLAG_PAIRS}pr\\s+(?:create|new|edit)\\b`,
+  "i",
+);
+
+/**
+ * `pr-create-needs-issue-link` anchor: pr create/new in ANY
+ * leading-flag position (#41, same bypass-closure rationale as
+ * `PR_BODY_ANCHOR`). The title/body checks are argv/value-based
+ * (`findFlagValue`, `bodyHasClosingKeyword`) — position-independent.
+ */
+export const PR_CREATE_ANCHOR = new RegExp(
+  `^gh\\s+${LEADING_FLAG_PAIRS}pr\\s+(?:create|new)\\b`,
+  "i",
+);
+
+/**
+ * `pr-merge-needs-closing-keywords` anchor: pr merge only, in ANY
+ * leading-flag position (#41 — a released flag-first merge must LAND
+ * on the subject policy, not bypass it). Fires unless the command
+ * carries a closing-keyword ref in the `--subject`
  * value (short `-t` form, `--flag=value` forms) — the gate is fully
  * declarative on the walker-parsed argv (`not.infoOnly` +
  * `requiresFlagValue` predicates from `@cad0p/pi-steering-flags`;
@@ -74,37 +116,72 @@ export const PR_CREATE_ANCHOR = /^gh\s+pr\s+(?:create|new)\b/i;
  * keywords, so the subject channel alone closes the issues (the
  * commit body is optional at merge).
  */
-export const PR_MERGE_ANCHOR = /^gh\s+pr\s+merge\b/i;
+export const PR_MERGE_ANCHOR = new RegExp(
+  `^gh\\s+${LEADING_FLAG_PAIRS}pr\\s+merge\\b`,
+  "i",
+);
 
-/** `issue-body-from-vault-file` anchor: issue create/edit. */
-export const ISSUE_BODY_ANCHOR = /^gh\s+issue\s+(?:create|edit)\b/i;
+/**
+ * `issue-body-from-vault-file` anchor: issue create/edit in ANY
+ * leading-flag position (#41, same bypass-closure rationale as
+ * `PR_BODY_ANCHOR`); the `missingVaultBodyFile` leaf is argv-based.
+ */
+export const ISSUE_BODY_ANCHOR = new RegExp(
+  `^gh\\s+${LEADING_FLAG_PAIRS}issue\\s+(?:create|edit)\\b`,
+  "i",
+);
 
-/** `gh-repo-create-needs-seed` anchor: repo create/new (new is the gh alias). */
-export const REPO_CREATE_ANCHOR = /^gh\s+repo\s+(?:create|new)\b/i;
+/**
+ * `gh-repo-create-needs-seed` anchor: repo create/new (new is the gh
+ * alias), in ANY leading-flag position — #41 widened with
+ * `LEADING_FLAG_PAIRS` like every other `^gh\s+` anchor: consistency
+ * across the anchor family, and a flag-first bare create (`gh -v
+ * --hostname h repo create foo`) previously escaped the empty-repo
+ * gate entirely. NOTE for `REPO_CREATE_PATTERN`'s derivation below:
+ * because this anchor CONSUMES leading flags, its seed-exemption scan
+ * must cover the WHOLE command — see the front-position negative
+ * lookahead there (a trailing one would be blind to seed flags the
+ * pairs unit ate, over-blocking `gh -g repo create foo`).
+ */
+export const REPO_CREATE_ANCHOR = new RegExp(
+  `^gh\\s+${LEADING_FLAG_PAIRS}repo\\s+(?:create|new)\\b`,
+  "i",
+);
 
 /**
  * `gh-repo-flag-before-subcommand` pattern: a SHAPE ROUTER — a gated
- * `pr create|new|edit|merge` or `issue create|edit` with ZERO or ONE
- * leading flag token (the optional group covers `gh pr merge …` AND
- * `gh -R x/y pr merge …`; two leading flags stay unrouted). It only
- * decides "is this a gated subcommand shape?" — whether the command
- * REPO-TARGETS is decided by the `foreignRepoTarget` predicate's
- * `-R/--repo` PRESENCE check on the walker argv (#39: presence, not
- * position — subcommand-first `-R x/y pr merge` routes since the
- * widening), via `@cad0p/pi-steering-flags`' `hasFlag`/`getFlagValue`
- * (arg layer, quote-aware). Commands without any `-R/--repo` route
- * but are RELEASED by the predicate and fall through to the
- * per-subcommand rules — the widened anchor deliberately OVERLAPS the
- * PR/issue body/create/merge anchors, and correctness rests on the
- * evaluator's first-firing-rule-wins ordering plus that release
- * fall-through, not on anchor disjointness. Slashless `-R upstream`
+ * `pr create|new|edit|merge` or `issue create|edit` preceded by ANY
+ * number of leading flag(+value) pairs (built from
+ * `LEADING_FLAG_PAIRS`, shared with the four per-subcommand anchors:
+ * #41 lifted the one-pair cap — zero pairs = subcommand-first, one
+ * pair = flag-first since #39, N pairs = newly routed; see there for
+ * the anti-ReDoS value-guard and the bare-dash unrouted edge). It
+ * only decides "is this a gated subcommand shape?" — whether the
+ * command REPO-TARGETS is decided by the `foreignRepoTarget`
+ * predicate's `-R/--repo` PRESENCE check on the walker argv (#39:
+ * presence, not position — subcommand-first `-R x/y pr merge` routes
+ * since the widening), via `@cad0p/pi-steering-flags`'
+ * `hasFlag`/`getFlagValue` (arg layer, quote-aware). Commands
+ * without any `-R/--repo` route but are RELEASED by the predicate
+ * and fall through to the per-subcommand rules — which NOW match
+ * flag-first forms too (same LEADING_FLAG_PAIRS widening), so a
+ * released command LANDS on its policy instead of bypassing the
+ * stack. The anchor deliberately OVERLAPS those anchors, and
+ * correctness rests on the evaluator's first-firing-rule-wins
+ * ordering plus that release fall-through, not on anchor
+ * disjointness (pinned in patterns.test.ts). Slashless `-R upstream`
  * routes too (fork remote-name form → released by the predicate).
- * Anchored `^gh\s` (no `echo gh …`). `repo create|new` is excluded
- * by design; read-only `pr view`/`issue list` never route. See the
- * rule doc comment.
+ * Greedy value consumption always backtracks until the tail matches,
+ * so extra leading flags never mask a routable tail (`gh -t pr
+ * merge` still routes — pinned). Anchored `^gh\s` (no `echo gh …`).
+ * `repo create|new` is excluded by design (the seed rule owns that
+ * gate); read-only `pr view`/
+ * `issue list` never route. See the rule doc comment.
  */
-export const REPO_FLAG_ANCHOR =
-  /^gh\s+(?:-[^\s]+(?:\s+[^\s]+)?\s+)?(?:pr\s+(?:create|new|edit|merge)|issue\s+(?:create|edit))\b/i;
+export const REPO_FLAG_ANCHOR = new RegExp(
+  `^gh\\s+${LEADING_FLAG_PAIRS}(?:pr\\s+(?:create|new|edit|merge)|issue\\s+(?:create|edit))\\b`,
+  "i",
+);
 
 /**
  * A seed flag as its own token: long or short form, ` ` or `=`
@@ -116,10 +193,18 @@ export const REPO_CREATE_SEED_FLAG =
 
 /**
  * Fires unless a seed flag token appears anywhere in the command.
- * Derived from `REPO_CREATE_ANCHOR` (its `source` + the `i` flag) so
- * the anchor constant can never drift from the shipped pattern.
+ * Derived from `REPO_CREATE_ANCHOR` (its `source`, same `i` flag) so
+ * the anchor constant can never drift from the shipped pattern. The
+ * seed-exemption lookahead sits BEFORE the anchor — scanning the
+ * whole command — because the widened anchor consumes leading flags:
+ * a TRAILING lookahead would only see tokens after `repo create`
+ * and wrongly block seeded flag-first creates (`gh -g repo create
+ * foo`). For subcommand-first commands (every pre-#41 input) the two
+ * compositions are verdict-identical: nothing but whitespace can sit
+ * between `gh` and `repo` there, so all flags were always in scan
+ * range.
  */
 export const REPO_CREATE_PATTERN = new RegExp(
-  `${REPO_CREATE_ANCHOR.source}(?![\\s\\S]*${REPO_CREATE_SEED_FLAG})`,
+  `^(?![\\s\\S]*${REPO_CREATE_SEED_FLAG})${REPO_CREATE_ANCHOR.source}`,
   "i",
 );

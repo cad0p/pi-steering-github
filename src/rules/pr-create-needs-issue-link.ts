@@ -10,7 +10,10 @@
  *
  * Does NOT fire on other gh subcommands. Fires on draft PRs without
  * keywords too (a tracking issue is the allowed pattern while a draft
- * is open). Strict — no override (schema default).
+ * is open). The anchor matches ANY leading-flag position (#41, shared
+ * `LEADING_FLAG_PAIRS` unit) — a gate-released flag-first create lands
+ * here instead of bypassing the issue-link policy. Strict — no
+ * override (schema default).
  */
 
 import type { Rule } from "@cad0p/pi-steering";

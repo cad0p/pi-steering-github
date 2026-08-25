@@ -529,6 +529,12 @@ describe("github plugin — PR rules (issue-link + vault body-file policy)", () 
       `gh pr merge --version`,
       `gh pr merge --squash --help`,
       `gh pr merge --help --squash`,
+      // Flag-first shapes (#41): the carve-out leaves are argv-token
+      // based, so they fire regardless of leading-flag position —
+      // routed by the gate (released: no -R) or straight to this
+      // rule via its widened anchor, either way a clean allow.
+      `gh -v pr merge --help`,
+      `gh --hostname h pr merge --squash -h`,
     ]) {
       const { block, rule } = await evaluateBash(makeFixtureDir(), cmd, host);
       assert.equal(
@@ -778,6 +784,48 @@ describe("github plugin — gh-repo-create-needs-seed (repo create must seed)", 
     );
     assert.equal(block, false, `expected allow, got block by ${rule}`);
   });
+
+  it("#41: multi-pair flag-first bare create blocks BY the seed rule", async () => {
+    // Pre-widening this escaped the empty-repo gate entirely (no
+    // anchor matched between gh and repo). The redirect router still
+    // EXCLUDES repo create (nothing to cd into) — the seed rule is
+    // what catches it now.
+    const { block, rule } = await evaluateBash(
+      makeFixtureDir(),
+      "gh --hostname h repo create foo",
+    );
+    assert.equal(block, true, "expected block");
+    assert.equal(rule, "gh-repo-create-needs-seed");
+    const onePair = await evaluateBash(
+      makeFixtureDir(),
+      "gh -v repo create foo",
+    );
+    assert.equal(onePair.block, true, "expected block");
+    assert.equal(onePair.rule, "gh-repo-create-needs-seed");
+  });
+
+  it("#41: seeded flag-first create passes the gate cleanly", async () => {
+    // Same shape, seed flag present → the whole-command exemption
+    // scan releases it; nothing else matches → clean allow.
+    const { block, rule } = await evaluateBash(
+      makeFixtureDir(),
+      "gh --hostname h repo create foo --add-readme",
+    );
+    assert.equal(block, false, `expected allow, got block by ${rule}`);
+  });
+
+  it("#41: -R x/y repo create escapes the REDIRECT but not the seed gate", async () => {
+    // Orthogonality pin: REPO_FLAG_ANCHOR deliberately excludes repo
+    // create (foreign gate — nothing to cd into yet), but that
+    // exclusion is NOT a policy bypass: the seed rule's widened
+    // anchor catches the bare create.
+    const { block, rule } = await evaluateBash(
+      makeFixtureDir(),
+      "gh -R x/y repo create foo",
+    );
+    assert.equal(block, true, "expected block");
+    assert.equal(rule, "gh-repo-create-needs-seed");
+  });
 });
 
 describe("github plugin — gh-repo-flag-before-subcommand (-R foreign-target gate)", () => {
@@ -805,17 +853,20 @@ describe("github plugin — gh-repo-flag-before-subcommand (-R foreign-target ga
     assert.equal(rule, "gh-repo-flag-before-subcommand");
   });
 
-  it("glue-aware: own-repo -Rcad0p/x short form releases (flags#11 adoption)", async () => {
+  it("glue-aware: own-repo -Rcad0p/x short form releases INTO THE POLICY STACK (flags#11 + #41)", async () => {
     // The walker keeps `-Rcad0p/Goldmine` as ONE word; glue-aware
     // target resolution (`{ gluedShorts: ["R"] }`, upstream
-    // cad0p/pi-steering-flags#11) now sees it → basename equality →
-    // allow. Pre-adoption this fail-closed on the unresolvable target
-    // (accepted over-block, pinned as a BEHAVIOR DELTA then).
+    // cad0p/pi-steering-flags#11) sees it → basename equality → the
+    // gate releases. #41 widening: the released command LANDS on the
+    // vault-body policy (create without a vault body file — blocked
+    // there, NOT a clean allow; pre-widening this was a subject/body
+    // policy bypass).
     const { block, rule } = await evaluateBash(
       makeFixtureDir(),
       "gh -Rcad0p/Goldmine pr create --title t",
     );
-    assert.equal(block, false, `expected allow, got block by ${rule}`);
+    assert.equal(block, true, `expected block, got allow`);
+    assert.equal(rule, "pr-body-from-vault-file");
   });
 
   it("glue-aware: foreign -Rcad0p/x short form blocks", async () => {
@@ -830,43 +881,53 @@ describe("github plugin — gh-repo-flag-before-subcommand (-R foreign-target ga
     assert.equal(rule, "gh-repo-flag-before-subcommand");
   });
 
-  it("allows the fork→upstream flow (target basename == cwd repo basename)", async () => {
+  it("fork→upstream flow passes the gate and lands on the body policy (#41)", async () => {
     // `gh -R upstream/Goldmine pr create` from inside the
-    // `cad0p/Goldmine` clone — the most common legit `-R` use.
+    // `cad0p/Goldmine` clone — the most common legit `-R` use. The
+    // basename-equality release still stands; post-widening the
+    // command lands on pr-body-from-vault-file (no vault body file
+    // here), which is exactly the bypass #41 closes.
     const { block, rule } = await evaluateBash(
       makeFixtureDir(),
       "gh -R upstream/Goldmine pr create --title t",
     );
-    assert.equal(block, false, `expected allow, got block by ${rule}`);
+    assert.equal(block, true, `expected block, got allow`);
+    assert.equal(rule, "pr-body-from-vault-file");
   });
 
-  it("releases slashless -R upstream (remote-name form)", async () => {
+  it("slashless -R upstream releases the gate and lands on the body policy (#41)", async () => {
+    // Remote-name form (no `/`) → not a foreign redirect → release;
+    // post-widening the create lands on the vault-body rule.
     const { block, rule } = await evaluateBash(
       makeFixtureDir(),
       "gh -R upstream pr create --title t",
     );
-    assert.equal(block, false, `expected allow, got block by ${rule}`);
+    assert.equal(block, true, `expected block, got allow`);
+    assert.equal(rule, "pr-body-from-vault-file");
   });
 
-  it("BEHAVIOR DELTA (#36): bare --version exempts (infoOnly default set)", async () => {
-    // A gated invocation carrying --version flips block→allow:
-    // the not.infoOnly leaf allows before the foreign-target
-    // predicate is consulted. gh errors on --version for pr/issue
-    // subcommands anyway — invalid invocation, nothing real can
-    // happen.
+  it("GATE-SCOPED carve-out (#36/#41): bare --version exempts the REDIRECT but not the stack", async () => {
+    // `not.infoOnly` exempts THIS gate only; the per-subcommand rules
+    // never had an infoOnly exemption for create, so post-widening
+    // the command lands on the vault-body policy and blocks. Same
+    // outcome class as its subcommand-first twin (`gh pr create
+    // --version` always matched PR_BODY_ANCHOR). Invalid invocation
+    // either way — nothing real can happen.
     const { block, rule } = await evaluateBash(
       makeFixtureDir(),
       "gh -R cad0p/other-repo pr create --version",
     );
-    assert.equal(block, false, `expected allow, got block by ${rule}`);
+    assert.equal(block, true, `expected block, got allow`);
+    assert.equal(rule, "pr-body-from-vault-file");
   });
 
-  it("BEHAVIOR DELTA (#36): attached --version=1 exempts too", async () => {
+  it("GATE-SCOPED carve-out (#36/#41): attached --version=1 lands on the body policy too", async () => {
     const { block, rule } = await evaluateBash(
       makeFixtureDir(),
       "gh -R cad0p/other-repo pr create --version=1",
     );
-    assert.equal(block, false, `expected allow, got block by ${rule}`);
+    assert.equal(block, true, `expected block, got allow`);
+    assert.equal(rule, "pr-body-from-vault-file");
   });
 
   it("keeps -v gated (deliberately absent from the infoOnly set)", async () => {
@@ -888,6 +949,78 @@ describe("github plugin — gh-repo-flag-before-subcommand (-R foreign-target ga
     );
     assert.equal(block, true, "expected block");
     assert.equal(rule, "gh-repo-flag-before-subcommand");
+  });
+
+  it("#41: TWO leading flag pairs route — a foreign target blocks BY this rule", async () => {
+    // Pre-#41 this shape escaped the router entirely (one-pair cap):
+    // `--hostname h -R …` is two flag(+value) pairs. The redirect
+    // masks the closing-keywords allowance as usual (first-fires-wins).
+    const { block, rule } = await evaluateBash(
+      makeFixtureDir(),
+      'gh --hostname h -R cad0p/other-repo pr merge --subject "feat: x (closes #12)"',
+    );
+    assert.equal(block, true, "expected block");
+    assert.equal(rule, "gh-repo-flag-before-subcommand");
+  });
+
+  it("#41: two leading flag pairs with an OWN-repo target RELEASE onto the merge policy", async () => {
+    // Fixture cwd repo basename is cad0p/Goldmine (default host
+    // remote). Same shape as the foreign twin below — routed by the
+    // widened router anchor, released by the predicate on the
+    // basename match, and post-widening the released command LANDS on
+    // pr-merge-needs-closing-keywords (no --subject → blocked there,
+    // NOT a clean allow; pre-widening this was a subject-policy
+    // bypass dating back to #39's one-pair class).
+    const own = await evaluateBash(
+      makeFixtureDir(),
+      "gh --hostname h -R cad0p/Goldmine pr merge --squash",
+    );
+    assert.equal(own.block, true, `expected block, got allow`);
+    assert.equal(own.rule, "pr-merge-needs-closing-keywords");
+    const foreign = await evaluateBash(
+      makeFixtureDir(),
+      "gh --hostname h -R cad0p/other-repo pr merge --squash",
+    );
+    assert.equal(foreign.block, true, "expected block");
+    assert.equal(foreign.rule, "gh-repo-flag-before-subcommand");
+  });
+
+  it("#41: two leading flag pairs + own repo + VALID subject passes the full stack", async () => {
+    // The complement of the pin above: the gate releases byte-for-byte
+    // AND the landed policy is satisfied → clean allow. Proves the
+    // release is real end-to-end (a fail-closed regression would block
+    // by gh-repo-flag-before-subcommand instead).
+    const { block, rule } = await evaluateBash(
+      makeFixtureDir(),
+      'gh --hostname h -R cad0p/Goldmine pr merge --squash --subject "fix: x (closes #12)"',
+    );
+    assert.equal(block, false, `expected allow, got block by ${rule}`);
+  });
+
+  it("#41: multi-flag command without -R anywhere falls through to closing-keywords", async () => {
+    // THE #41 acceptance example: routed by the unbounded anchor;
+    // absent repo flag → predicate releases; the widened
+    // PR_MERGE_ANCHOR catches the released form and the missing
+    // closing-keyword subject blocks. Pre-widening this was a clean
+    // allow — the exact bypass the widening exists to close.
+    const { block, rule } = await evaluateBash(
+      makeFixtureDir(),
+      "gh -v --hostname h pr merge --squash",
+    );
+    assert.equal(block, true, `expected block, got allow`);
+    assert.equal(rule, "pr-merge-needs-closing-keywords");
+  });
+
+  it("#41: multi-flag create lands on the vault-body rule", async () => {
+    // Leading flags + inline body: pr-body-from-vault-file matches
+    // the flag-first shape now and blocks before the issue-link rule
+    // even evaluates (roster order).
+    const { block, rule } = await evaluateBash(
+      makeFixtureDir(),
+      'gh --hostname h pr create --title "Closes #1" --body "inline"',
+    );
+    assert.equal(block, true, "expected block");
+    assert.equal(rule, "pr-body-from-vault-file");
   });
 
   it("fall-through: no-flag mutations reach the per-subcommand rules", async () => {
