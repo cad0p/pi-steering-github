@@ -348,7 +348,7 @@ describe("renderBodyFileDiff", () => {
       "substitution program diverges from the pinned strip at byte 124:\n" +
         "  - expected: r?\\n)*)?\n" +
         "  + got:      n?\\r)?)*",
-      );
+    );
   });
 
   it("cat → the two full lines", () => {
