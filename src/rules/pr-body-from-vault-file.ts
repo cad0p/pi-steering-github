@@ -23,10 +23,10 @@
  * `reason: (ctx) => string | Promise<string>`, errors replaced by
  * the evaluator's fail-safe fallback): a `--body-file` substitution
  * whose inner command deviates from the pinned one-liner now carries
- * a byte-exact diagnostic (divergent core spans with the byte
- * offset, or the positional token report) before the canonical
- * static recipe — the predicate and this reason consume the SAME
- * `explainBodyFileArg` stage, so verdict and message never drift.
+ * a byte-exact diagnostic (the divergent core spans with the byte
+ * offset, or the two full command lines) before the canonical static
+ * recipe — the predicate and this reason consume the SAME
+ * `explainBodyFileArg` tag, so verdict and message never drift.
  */
 
 import type { Rule } from "@cad0p/pi-steering";
@@ -34,7 +34,7 @@ import { BODY_STRIP } from "../helpers/body-strip.ts";
 import {
   explainBodyFileArg,
   findBodyFileValue,
-  renderBodyFileExplain,
+  renderBodyFileDiff,
 } from "../helpers/pattern-args.ts";
 import { PR_BODY_ANCHOR } from "../helpers/patterns.ts";
 
@@ -51,6 +51,10 @@ export const prBodyFromVaultFile = {
   field: "command",
   pattern: PR_BODY_ANCHOR,
   when: { missingVaultBodyFile: { section: "prs" } },
-  reason: (ctx) =>
-    renderBodyFileExplain(explainBodyFileArg(findBodyFileValue(ctx)), STATIC),
+  reason: (ctx) => {
+    const v = findBodyFileValue(ctx);
+    return explainBodyFileArg(v) === "diff"
+      ? `${renderBodyFileDiff(v)}\n\n${STATIC}`
+      : STATIC;
+  },
 } as const satisfies Rule;
