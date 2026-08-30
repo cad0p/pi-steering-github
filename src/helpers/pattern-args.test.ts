@@ -4,8 +4,7 @@
 /**
  * Unit tests for the arg helpers (`unquote`, `findFlagValue`,
  * `findBodyFileValue`, `parseBodyFileArg`, `explainBodyFileArg`,
- * `renderBodyFileExplain`, `resolveAgainstCwd`) and their
- * scaffolding.
+ * `renderBodyFileDiff`, `resolveAgainstCwd`) and their scaffolding.
  */
 
 import assert from "node:assert/strict";
@@ -17,7 +16,7 @@ import {
   findBodyFileValue,
   findFlagValue,
   parseBodyFileArg,
-  renderBodyFileExplain,
+  renderBodyFileDiff,
   resolveAgainstCwd,
   unquote,
 } from "./pattern-args.ts";
@@ -250,207 +249,168 @@ describe("parseBodyFileArg", () => {
 });
 
 // ---------------------------------------------------------------------------
-// explainBodyFileArg
+// explainBodyFileArg (the 5-tag classify — no detail payloads)
 // ---------------------------------------------------------------------------
 
 describe("explainBodyFileArg", () => {
-  it("classifies the pinned substitution as ok with the path", () => {
-    assert.deepEqual(
-      explainBodyFileArg(
-        `<(perl -0777 -pe '${BODY_STRIP}' /vault/prs/note.md)`,
-      ),
-      {
-        stage: "ok",
-        detail: { kind: "substitution", path: "/vault/prs/note.md" },
-      },
-    );
+  it("empty value → missing", () => {
+    assert.equal(explainBodyFileArg(""), "missing");
   });
 
-  it("incident byte-swap (`*)?` vs `?)*`) → diff stage with the got tokens", () => {
-    // The pi#8845 incident: a 2-char swap at byte 129 of 135 that
-    // the agent could not see with the static reason.
-    const mutatedProgram = `${BODY_STRIP.slice(0, 129)}?)*${BODY_STRIP.slice(132)}`;
-    assert.equal(mutatedProgram.length, BODY_STRIP.length);
-    assert.deepEqual(
-      explainBodyFileArg(
-        `<(perl -0777 -pe '${mutatedProgram}' /vault/prs/note.md)`,
-      ),
-      {
-        stage: "diff",
-        detail: {
-          gotTokens: [
-            "perl",
-            "-0777",
-            "-pe",
-            mutatedProgram,
-            "/vault/prs/note.md",
-          ],
-        },
-      },
-    );
-  });
-
-  it("cat substitution (2 tokens) → diff stage", () => {
-    assert.deepEqual(explainBodyFileArg("<(cat /vault/prs/note.md)"), {
-      stage: "diff",
-      detail: { gotTokens: ["cat", "/vault/prs/note.md"] },
-    });
-  });
-
-  it("missing path (4 tokens) → diff stage", () => {
-    assert.deepEqual(explainBodyFileArg(`<(perl -0777 -pe '${BODY_STRIP}')`), {
-      stage: "diff",
-      detail: { gotTokens: ["perl", "-0777", "-pe", BODY_STRIP] },
-    });
-  });
-
-  it("extra trailing token (6 tokens) → diff stage", () => {
-    assert.deepEqual(
-      explainBodyFileArg(
-        `<(perl -0777 -pe '${BODY_STRIP}' /vault/prs/note.md extra)`,
-      ),
-      {
-        stage: "diff",
-        detail: {
-          gotTokens: [
-            "perl",
-            "-0777",
-            "-pe",
-            BODY_STRIP,
-            "/vault/prs/note.md",
-            "extra",
-          ],
-        },
-      },
-    );
+  it("plain path → direct", () => {
+    assert.equal(explainBodyFileArg("/vault/prs/note.md"), "direct");
   });
 
   it("unclosed <( form → form", () => {
-    assert.deepEqual(explainBodyFileArg(`<(perl -0777 -pe '${BODY_STRIP}'`), {
-      stage: "form",
-    });
+    assert.equal(
+      explainBodyFileArg(`<(perl -0777 -pe '${BODY_STRIP}'`),
+      "form",
+    );
   });
 
-  it("plain path → direct stage (wrapper round-trips it)", () => {
-    assert.deepEqual(explainBodyFileArg("/vault/prs/note.md"), {
-      stage: "direct",
-      detail: { kind: "direct", path: "/vault/prs/note.md" },
-    });
-    // The wrapper must map BOTH ok and direct stages to their
-    // parsed result (body-keyword.ts raw-reads direct paths).
-    assert.deepEqual(parseBodyFileArg("/vault/prs/note.md"), {
-      kind: "direct",
-      path: "/vault/prs/note.md",
-    });
+  it("pinned substitution → ok", () => {
+    assert.equal(
+      explainBodyFileArg(
+        `<(perl -0777 -pe '${BODY_STRIP}' /vault/prs/note.md)`,
+      ),
+      "ok",
+    );
   });
 
-  it("empty value → missing", () => {
-    assert.deepEqual(explainBodyFileArg(""), { stage: "missing" });
+  it("incident byte-swap (`*)?` vs `?)*`) → diff", () => {
+    const mutatedProgram = `${BODY_STRIP.slice(0, 129)}?)*${BODY_STRIP.slice(132)}`;
+    assert.equal(mutatedProgram.length, BODY_STRIP.length);
+    assert.equal(
+      explainBodyFileArg(
+        `<(perl -0777 -pe '${mutatedProgram}' /vault/prs/note.md)`,
+      ),
+      "diff",
+    );
+  });
+
+  it("cat substitution (2 tokens) → diff", () => {
+    assert.equal(explainBodyFileArg("<(cat /vault/prs/note.md)"), "diff");
+  });
+
+  it("sed with the pinned program → diff (never ok — tool pin)", () => {
+    assert.equal(
+      explainBodyFileArg(`<(sed -0777 -pe '${BODY_STRIP}' /vault/prs/note.md)`),
+      "diff",
+    );
   });
 });
 
 // ---------------------------------------------------------------------------
-// renderBodyFileExplain
+// renderBodyFileDiff
 // ---------------------------------------------------------------------------
 
-describe("renderBodyFileExplain", () => {
-  const staticReason = "STATIC REASON\n";
-
-  it("missing / direct / form / ok stages return the static reason byte-for-byte", () => {
-    const staged = [
-      { stage: "missing" },
-      {
-        stage: "direct",
-        detail: { kind: "direct", path: "/vault/prs/note.md" },
-      },
-      { stage: "form" },
-      {
-        stage: "ok",
-        detail: { kind: "substitution", path: "/vault/prs/note.md" },
-      },
-    ] as const;
-    for (const explained of staged) {
-      assert.equal(
-        renderBodyFileExplain(explained, staticReason),
-        staticReason,
-      );
-    }
-  });
-
-  it("diff (cat) → the full-line pair + static", () => {
-    assert.equal(
-      renderBodyFileExplain(
-        {
-          stage: "diff",
-          detail: { gotTokens: ["cat", "/vault/prs/note.md"] },
-        },
-        staticReason,
-      ),
-      "substitution inner command deviates from the pinned strip:\n" +
-        `  - expected: perl -0777 -pe '${BODY_STRIP}' <path>\n` +
-        "  + got:      cat /vault/prs/note.md\n" +
-        "\n" +
-        staticReason,
-    );
-  });
-
-  it("diff (incident) → the byte pair + static", () => {
+describe("renderBodyFileDiff", () => {
+  it("incident byte-swap at 129 → ONE byte pair with spans `*)?` / `?)*`", () => {
+    // The pi#8845 incident: a 2-char swap at byte 129 of 135 that
+    // the agent could not see with the static reason. The bounded
+    // suffix trim (bound = min(len) - prefix = 6) stops before the
+    // common `?)*`-diverging tail, so the pair survives.
     const mutatedProgram = `${BODY_STRIP.slice(0, 129)}?)*${BODY_STRIP.slice(132)}`;
-    const rendered = renderBodyFileExplain(
-      explainBodyFileArg(
+    assert.equal(mutatedProgram.length, BODY_STRIP.length);
+    assert.equal(
+      renderBodyFileDiff(
         `<(perl -0777 -pe '${mutatedProgram}' /vault/prs/note.md)`,
       ),
-      staticReason,
-    );
-    assert.equal(
-      rendered,
       "substitution program diverges from the pinned strip at byte 129:\n" +
         "  - expected: *)?\n" +
-        "  + got:      ?)*\n" +
-        "\n" +
-        staticReason,
+        "  + got:      ?)*",
     );
   });
 
-  it("diff (exactly-60% span) stays a byte pair (strict >)", () => {
+  it("overwrite at 129 → same offset, spans `*)?` / `XYZ`", () => {
+    const mutatedProgram = `${BODY_STRIP.slice(0, 129)}XYZ${BODY_STRIP.slice(132)}`;
+    assert.equal(mutatedProgram.length, BODY_STRIP.length);
+    assert.equal(
+      renderBodyFileDiff(
+        `<(perl -0777 -pe '${mutatedProgram}' /vault/prs/note.md)`,
+      ),
+      "substitution program diverges from the pinned strip at byte 129:\n" +
+        "  - expected: *)?\n" +
+        "  + got:      XYZ",
+    );
+  });
+
+  it("two tail edits → ONE byte pair at the first divergence (byte 124)", () => {
+    // Bytes 123-127 `\r?\n` → `\n?\r` and bytes 129-131 `*)?` →
+    // `?)*`: the first divergence is byte 124 (`r` → `n`; byte 123
+    // is the shared `\`), the suffix trim folds the rest of the
+    // reordered tail into the single pair.
+    const got = `${BODY_STRIP.slice(0, 123)}\\n?\\r${BODY_STRIP.slice(128)}`;
+    const got2 = `${got.slice(0, 129)}?)*${got.slice(132)}`;
+    assert.equal(got2.length, BODY_STRIP.length);
+    assert.equal(
+      renderBodyFileDiff(`<(perl -0777 -pe '${got2}' /vault/prs/note.md)`),
+      "substitution program diverges from the pinned strip at byte 124:\n" +
+        "  - expected: r?\\n)*)?\n" +
+        "  + got:      n?\\r)?)*",
+      );
+  });
+
+  it("cat → the two full lines", () => {
+    assert.equal(
+      renderBodyFileDiff("<(cat /vault/prs/note.md)"),
+      "substitution inner command deviates from the pinned strip:\n" +
+        `  - expected: perl -0777 -pe '${BODY_STRIP}' <path>\n` +
+        "  + got:      cat /vault/prs/note.md",
+    );
+  });
+
+  it("far-apart edits (bytes 5 + 130, ~93% diverging) → full lines", () => {
+    const farApart = `${BODY_STRIP.slice(0, 5)}Z${BODY_STRIP.slice(6)}`;
+    const farApart2 = `${farApart.slice(0, 130)}Q${farApart.slice(131)}`;
+    assert.equal(farApart2.length, BODY_STRIP.length);
+    assert.equal(
+      renderBodyFileDiff(`<(perl -0777 -pe '${farApart2}' /vault/prs/note.md)`),
+      "substitution inner command deviates from the pinned strip:\n" +
+        `  - expected: perl -0777 -pe '${BODY_STRIP}' <path>\n` +
+        `  + got:      perl -0777 -pe '${farApart2}' /vault/prs/note.md`,
+    );
+  });
+
+  it("sed with the pinned program → full lines (never a byte pair)", () => {
+    // The sed substitution's program token IS the pinned strip —
+    // the core pair is empty; the tool pin is what fails, so the
+    // full lines show the sed shape.
+    assert.equal(
+      renderBodyFileDiff(`<(sed -0777 -pe '${BODY_STRIP}' /vault/prs/note.md)`),
+      "substitution inner command deviates from the pinned strip:\n" +
+        `  - expected: perl -0777 -pe '${BODY_STRIP}' <path>\n` +
+        `  + got:      sed -0777 -pe '${BODY_STRIP}' /vault/prs/note.md`,
+    );
+  });
+
+  it("exactly-60% span (81/135) stays a byte pair (strict >)", () => {
     // Differing span = exactly 0.6 * 135 = 81 chars (prefix 27,
     // suffix 27) — 81 > 81 is false on both sides, so no fallback.
     const gotProgram =
       BODY_STRIP.slice(0, 27) + "x".repeat(81) + BODY_STRIP.slice(108);
     assert.equal(gotProgram.length, BODY_STRIP.length);
-    const rendered = renderBodyFileExplain(
-      explainBodyFileArg(
+    assert.equal(
+      renderBodyFileDiff(
         `<(perl -0777 -pe '${gotProgram}' /vault/prs/note.md)`,
       ),
-      staticReason,
-    );
-    assert.equal(
-      rendered,
       `substitution program diverges from the pinned strip at byte 27:\n` +
         `  - expected: ${BODY_STRIP.slice(27, 108)}\n` +
-        `  + got:      ${"x".repeat(81)}\n` +
-        "\n" +
-        staticReason,
+        `  + got:      ${"x".repeat(81)}`,
     );
   });
 
-  it("diff (82/135 span, just over the ratio) → the full-line pair", () => {
+  it("82/135 span (just over the ratio) → full lines", () => {
     const gotProgram =
       BODY_STRIP.slice(0, 26) + "x".repeat(82) + BODY_STRIP.slice(108);
     assert.equal(gotProgram.length, BODY_STRIP.length);
-    const rendered = renderBodyFileExplain(
-      explainBodyFileArg(
+    assert.equal(
+      renderBodyFileDiff(
         `<(perl -0777 -pe '${gotProgram}' /vault/prs/note.md)`,
       ),
-      staticReason,
-    );
-    assert.equal(
-      rendered,
       "substitution inner command deviates from the pinned strip:\n" +
         `  - expected: perl -0777 -pe '${BODY_STRIP}' <path>\n` +
-        `  + got:      perl -0777 -pe '${gotProgram}' /vault/prs/note.md\n` +
-        "\n" +
-        staticReason,
+        `  + got:      perl -0777 -pe '${gotProgram}' /vault/prs/note.md`,
     );
   });
 });
