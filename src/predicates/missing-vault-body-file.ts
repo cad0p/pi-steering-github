@@ -33,7 +33,7 @@
  *     body file must live under.
  *
  * The arg helpers it uses (`findFlagValue`, `findBodyFileValue`,
- * `parseBodyFileArg`, `resolveAgainstCwd`, `bodyHasClosingKeyword`,
+ * `explainBodyFileArg`, `resolveAgainstCwd`, `bodyHasClosingKeyword`,
  * plus the low-level `argText` / `unquote`) live in
  * `../helpers/` and are re-exported through `./index.ts` for unit
  * tests and `when.condition` escape-hatch use.
@@ -44,8 +44,8 @@ import { dirname, relative, sep } from "node:path";
 import { isNapkinVaultDir } from "@cad0p/pi-napkin/steering";
 import type { PredicateContext, PredicateHandler } from "@cad0p/pi-steering";
 import {
+  explainBodyFileArg,
   findBodyFileValue,
-  parseBodyFileArg,
   resolveAgainstCwd,
 } from "../helpers/pattern-args.ts";
 import { repoName } from "../helpers/repo-name.ts";
@@ -67,16 +67,16 @@ export const missingVaultBodyFile: PredicateHandler<{
 }> = async (args, ctx: PredicateContext) => {
   const value = findBodyFileValue(ctx);
   if (value === "") return true; // no body file at all → missing
-  const parsed = parseBodyFileArg(value);
-  if (parsed === null) return true; // unparsable value → fail-closed
-  if (parsed.kind === "direct") {
-    // Direct vault paths upload the file VERBATIM (frontmatter
-    // renders on GitHub) — only the pinned substitution is accepted.
-    return true;
-  }
+  // Same explain helper the rules' dynamic reason consumes, same
+  // value — verdict and diagnostic can never drift. Any stage
+  // other than `ok` fails closed (missing, direct path, unclosed
+  // form, token deviation, core divergence).
+  const explained = explainBodyFileArg(value);
+  if (explained.stage !== "ok") return true;
+  const path = explained.detail.path;
   // Substitution form OK — validate the vault path (restored from
   // v0.1.0 via #12; the strip work dropped this validation).
-  const abs = resolveAgainstCwd(ctx, parsed.path);
+  const abs = resolveAgainstCwd(ctx, path);
   if (abs === null) return true; // walker-unknown cwd → fail-closed
   try {
     if (!existsSync(abs) || !statSync(abs).isFile()) return true;

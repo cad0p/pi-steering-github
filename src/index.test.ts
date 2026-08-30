@@ -8,6 +8,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import type { PredicateContext } from "@cad0p/pi-steering";
 import { BODY_STRIP } from "./helpers/body-strip.ts";
 import {
   ghRepoCreateNeedsSeed,
@@ -44,10 +45,21 @@ describe("github plugin — reason strings (byte-identity pins)", () => {
   // config's integration tests match rule NAMES only — so these
   // literals are the only CI pin keeping the full reason text from
   // drifting. A future reword MUST update this test in the same
-  // commit (and ideally the goldmine changelog note).
-  it("pr-body-from-vault-file reason", () => {
+  // commit (and ideally the goldmine changelog note). Since #43 the
+  // two body-file rules' reason is a ReasonFn — the pins below call
+  // it on the missing stage (empty args), which returns the static
+  // recipe byte-for-byte; the dynamic diagnostic stages are pinned
+  // by pattern-args.test.ts + integration.test.ts.
+  it("pr-body-from-vault-file reason (dynamic — missing stage returns the static recipe byte-for-byte)", () => {
+    // reason is now a ReasonFn (dynamic byte-diff diagnostic, #43).
+    // Invoked with a minimal empty-args ctx: findBodyFileValue → ""
+    // → missing stage → the static recipe, byte-for-byte, no throw
+    // (the chain is fs/exec-free on the static path).
+    const reason = prBodyFromVaultFile.reason({
+      input: { args: [] },
+    } as unknown as PredicateContext);
     assert.equal(
-      prBodyFromVaultFile.reason,
+      reason,
       "PR bodies must come from a body file in the napkin vault:\n" +
         '  gh pr create --title "..." --body-file ' +
         `<(perl -0777 -pe '${BODY_STRIP}' ` +
@@ -78,9 +90,13 @@ describe("github plugin — reason strings (byte-identity pins)", () => {
     );
   });
 
-  it("issue-body-from-vault-file reason", () => {
+  it("issue-body-from-vault-file reason (dynamic — missing stage returns the static recipe byte-for-byte)", () => {
+    // Same ReasonFn invocation pin as the PR twin (missing stage).
+    const reason = issueBodyFromVaultFile.reason({
+      input: { args: [] },
+    } as unknown as PredicateContext);
     assert.equal(
-      issueBodyFromVaultFile.reason,
+      reason,
       "Issue bodies must come from a body file in the napkin vault:\n" +
         '  gh issue create --title "..." --body-file ' +
         `<(perl -0777 -pe '${BODY_STRIP}' ` +
