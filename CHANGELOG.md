@@ -15,6 +15,7 @@ All notable changes to this project will be documented in this file.
 - Glue-aware -R target resolution — drop the glued-short over-block (closes #27)
 - *(rules)* Foreign-target gate follows -R/--repo presence, not command shape (closes #39)
 - *(rules)* Lift the REPO_FLAG_ANCHOR leading-flag cap (? → *) — route any number of leading flag(+value) pairs (closes #41)
+- *(rules)* Dynamic byte-diff block reason for the body-file rules (closes #43)
 
 ### 🐛 Bug Fixes
 
