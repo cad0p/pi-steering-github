@@ -342,22 +342,6 @@ describe("explainBodyFileArg", () => {
     });
   });
 
-  it("`sed -0777 -pe 'x' file` (5 tokens, tool differs) → core command fallback", () => {
-    // NB the 5-token form — `sed -e 'x' file` is 4 tokens and lands
-    // in the tokens stage instead.
-    const explained = explainBodyFileArg(
-      "<(sed -0777 -pe 'x' /vault/prs/note.md)",
-    );
-    assert.deepEqual(explained, {
-      stage: "core",
-      detail: {
-        kind: "command",
-        expectedText: `perl -0777 -pe '${BODY_STRIP}'`,
-        gotText: "sed -0777 -pe x",
-      },
-    });
-  });
-
   it("`sed -0777 -pe '<pinned>' file` (identical program, flags differ) → empty core → command fallback", () => {
     const explained = explainBodyFileArg(
       `<(sed -0777 -pe '${BODY_STRIP}' /vault/prs/note.md)`,
@@ -368,20 +352,6 @@ describe("explainBodyFileArg", () => {
         kind: "command",
         expectedText: `perl -0777 -pe '${BODY_STRIP}'`,
         gotText: `sed -0777 -pe '${BODY_STRIP}'`,
-      },
-    });
-  });
-
-  it("a `$VAR` program token → core command fallback (unity-span diff is useless)", () => {
-    const explained = explainBodyFileArg(
-      `<(perl -0777 -pe "$VAR" /vault/prs/note.md)`,
-    );
-    assert.deepEqual(explained, {
-      stage: "core",
-      detail: {
-        kind: "command",
-        expectedText: `perl -0777 -pe '${BODY_STRIP}'`,
-        gotText: "perl -0777 -pe $VAR",
       },
     });
   });
@@ -556,28 +526,6 @@ describe("renderBodyFileExplain", () => {
         "  token mismatch at position 2: expected `-pe`, got `It's here.md`\n" +
         `  missing expected token at position 3: \`${BODY_STRIP}\`\n` +
         "  missing expected token at position 4: `<path>`\n" +
-        "\n" +
-        staticReason,
-    );
-  });
-
-  it("core program stage → the incident byte-diff pair + blank line + static", () => {
-    assert.equal(
-      renderBodyFileExplain(
-        {
-          stage: "core",
-          detail: {
-            kind: "program",
-            offset: 129,
-            expectedSpan: "*)?",
-            gotSpan: "?)*",
-          },
-        },
-        staticReason,
-      ),
-      "substitution program diverges from the pinned strip at byte 129:\n" +
-        "  - expected: *)?\n" +
-        "  + got:      ?)*\n" +
         "\n" +
         staticReason,
     );

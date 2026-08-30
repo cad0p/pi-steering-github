@@ -138,12 +138,11 @@ export type BodyFileArg =
  *   - `tokens` — token count ≠ 5: positional mismatch report
  *     (extra tokens beyond the shorter list are unexpected, missing
  *     ones expected-but-absent).
- *   - `core` — count = 5 but any of tokens[0..3] ≠ pinned: the
+ *   - `core` — count = 5 but any of tokens[0..3] ≠ pinned; the
  *     program token vs `BODY_STRIP` is byte-balanced into one
- *     `- expected:` / `+ got:` span pair (`kind: "program"`), or —
- *     when the remaining core is empty (flags differ but the
- *     program is identical) or a span exceeds 60% of its own
- *     string — the full inner-command lines (`kind: "command"`).
+ *     `- expected:` / `+ got:` span pair (`kind: "program"`), or
+ *     the full inner-command lines (`kind: "command"`) when the
+ *     core is empty / oversized (see `CoreDiffDetail`).
  */
 export type BodyFileExplain =
   | { stage: "missing" }
