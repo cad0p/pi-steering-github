@@ -132,53 +132,21 @@ export type BodyFileArg =
  *     feeds the `parseBodyFileArg` wrapper for the disabled-rules
  *     keyword fallback).
  *   - `form` — starts `<(` but has no closing `)` (unclosed form).
- *   - `ok` — exactly `perl -0777 -pe <BODY_STRIP> <path>` (5
- *     tokens, 4 pinned, path non-empty — `tokenizeInner` never
- *     emits empty tokens).
- *   - `tokens` — token count ≠ 5: positional mismatch report
- *     (extra tokens beyond the shorter list are unexpected, missing
- *     ones expected-but-absent).
- *   - `core` — count = 5 but any of tokens[0..3] ≠ pinned; the
- *     program token vs `BODY_STRIP` is byte-balanced into one
- *     `- expected:` / `+ got:` span pair (`kind: "program"`), or
- *     the full inner-command lines (`kind: "command"`) when the
- *     core is empty / oversized (see `CoreDiffDetail`).
+ *   - `ok` — exactly `perl -0777 -pe <BODY_STRIP> <path>`.
+ *   - `diff` — any other inner command; `gotTokens` for display.
  */
 export type BodyFileExplain =
   | { stage: "missing" }
   | { stage: "direct"; detail: { kind: "direct"; path: string } }
   | { stage: "form" }
   | { stage: "ok"; detail: { kind: "substitution"; path: string } }
-  | { stage: "tokens"; detail: { expected: string[]; got: string[] } }
-  | { stage: "core"; detail: CoreDiffDetail };
+  | { stage: "diff"; detail: { gotTokens: string[] } };
 
 /**
- * The `core`-stage diff detail. `kind: "program"` = the byte
- * pair inside the program token (`offset` = common-prefix length in
- * STRING indices — the pinned program is pure ASCII, so index ==
- * byte; never Buffer-decode or re-interpret the `\xEF\xBB\xBF`
- * escape text). `kind: "command"` = the full inner-command lines
- * (tokens 0..3, the path argument excluded).
- */
-export type CoreDiffDetail =
-  | {
-      kind: "program";
-      offset: number;
-      expectedSpan: string;
-      gotSpan: string;
-    }
-  | {
-      kind: "command";
-      expectedText: string;
-      gotText: string;
-    };
-
-/**
- * Span-to-string fallback ratio for the `core` stage: when either
+ * Span-to-string fallback ratio for the `diff` stage: when either
  * remaining span exceeds this fraction of ITS OWN string's length
  * (strict `>`), the pair is useless and the renderer falls back to
- * the full-line command pair. Measured on spans vs their own
- * strings, never a span vs itself.
+ * the full-line command pair.
  */
 export const FULL_LINE_FALLBACK_RATIO = 0.6;
 
@@ -210,153 +178,87 @@ export function explainBodyFileArg(value: string): BodyFileExplain {
           return { stage: "ok", detail: { kind: "substitution", path } };
         }
       }
-      return explainCore(tokens);
     }
-    return {
-      stage: "tokens",
-      detail: {
-        expected: [...STRIP_COMMAND_TOKENS, "<path>"],
-        got: tokens,
-      },
-    };
+    return { stage: "diff", detail: { gotTokens: tokens } };
   }
   return { stage: "direct", detail: { kind: "direct", path: value } };
-}
-
-/**
- * Byte-balance the program token against the pinned constant and
- * pick the `core` detail shape. The common-prefix length is the
- * byte offset in STRING indices (the program is pure ASCII — the
- * `\xEF\xBB\xBF` BOM is literal escape TEXT, index == byte). The
- * common-suffix trim is BOUNDED by `min(len) - prefix` — an
- * unbounded suffix loop hangs on identical strings. The ONE pair
- * covers every edit that survives the prefix/suffix trim; an empty
- * core (identical programs, differing flags) or an oversized span
- * (> 60% of either program) falls back to the full-line command
- * pair (`sed …`, `perl -pe …`, `$VAR` programs, far-apart edits).
- */
-function explainCore(tokens: string[]): BodyFileExplain {
-  const program = tokens[STRIP_COMMAND_TOKENS.length - 1] ?? "";
-  let prefix = 0;
-  const minLen = Math.min(program.length, BODY_STRIP.length);
-  while (prefix < minLen && program[prefix] === BODY_STRIP[prefix]) prefix++;
-  let suffix = 0;
-  const bound = minLen - prefix;
-  while (
-    suffix < bound &&
-    program[program.length - 1 - suffix] ===
-      BODY_STRIP[BODY_STRIP.length - 1 - suffix]
-  ) {
-    suffix++;
-  }
-  const expectedSpan = BODY_STRIP.slice(prefix, BODY_STRIP.length - suffix);
-  const gotSpan = program.slice(prefix, program.length - suffix);
-  const fallback =
-    (expectedSpan === "" && gotSpan === "") ||
-    expectedSpan.length > FULL_LINE_FALLBACK_RATIO * BODY_STRIP.length ||
-    gotSpan.length > FULL_LINE_FALLBACK_RATIO * program.length;
-  if (fallback) {
-    return {
-      stage: "core",
-      detail: {
-        kind: "command",
-        expectedText: `perl -0777 -pe '${BODY_STRIP}'`,
-        gotText: renderJoined(tokens.slice(0, STRIP_COMMAND_TOKENS.length)),
-      },
-    };
-  }
-  return {
-    stage: "core",
-    detail: { kind: "program", offset: prefix, expectedSpan, gotSpan },
-  };
-}
-
-/**
- * Re-quote a display token for the joined `got` lines: tokens
- * containing whitespace are wrapped in single quotes, or double
- * quotes when they contain a single quote. NB the pinned program
- * itself contains ONE real space (the `[ \t]` character class), so
- * a got-line program renders quoted — the paired lines stay
- * readable and symmetric with the quoted expected recipe.
- */
-function renderToken(token: string): string {
-  if (/\s/.test(token)) {
-    return token.includes("'") ? `"${token}"` : `'${token}'`;
-  }
-  return token;
-}
-
-/** Space-join tokens for display, re-quoting whitespace-bearing ones. */
-function renderJoined(tokens: readonly string[]): string {
-  return tokens.map(renderToken).join(" ");
 }
 
 /**
  * Render a body-file rule's block reason from its explain stage:
  * `missing` / `direct` / `form` / `ok` return `staticReason`
  * byte-for-byte (the ok stage fires only via the vault-path check,
- * which is not the substitution-shape diagnostic's job); `tokens` /
- * `core` prepend the diagnostic (raw bytes, `String.slice` + join
- * only) and append the rule's canonical static reason after a blank
+ * which is not the substitution-shape diagnostic's job); `diff`
+ * prepends the diagnostic (raw bytes, `String.slice` + join only)
+ * and appends the rule's canonical static reason after a blank
  * line so the message stays actionable.
  */
 export function renderBodyFileExplain(
   explained: BodyFileExplain,
   staticReason: string,
 ): string {
-  switch (explained.stage) {
-    case "missing":
-    case "direct":
-    case "form":
-    case "ok":
-      return staticReason;
-    case "tokens":
-      return `${renderTokens(explained.detail)}\n\n${staticReason}`;
-    case "core":
-      return `${renderCore(explained.detail)}\n\n${staticReason}`;
-  }
+  if (explained.stage !== "diff") return staticReason;
+  return `${renderDiff(explained.detail)}
+\n${staticReason}`;
 }
 
-/** The `tokens`-stage diagnostic: full-line pair + per-position detail. */
-function renderTokens(detail: { expected: string[]; got: string[] }): string {
-  const lines = [
-    "substitution inner command deviates from the pinned strip:",
-    `  - expected: perl -0777 -pe '${BODY_STRIP}' <path>`,
-    `  + got:      ${renderJoined(detail.got)}`,
-  ];
-  const positions = Math.max(detail.expected.length, detail.got.length);
-  for (let i = 0; i < positions; i++) {
-    const expected = detail.expected[i];
-    const got = detail.got[i];
-    if (expected !== undefined && got !== undefined) {
-      if (expected !== got) {
-        lines.push(
-          `  token mismatch at position ${i}: expected \`${expected}\`, got \`${got}\``,
-        );
-      }
-    } else if (got !== undefined) {
-      lines.push(`  unexpected token at position ${i}: \`${got}\``);
-    } else {
-      lines.push(`  missing expected token at position ${i}: \`${expected}\``);
+/**
+ * The `diff` diagnostic: when the inner command has the pinned
+ * shape (5 tokens, first three pinned) but the program token
+ * diverges, show the divergent core with the byte offset;
+ * otherwise show the two full lines.
+ */
+function renderDiff(detail: { gotTokens: string[] }): string {
+  const tokens = detail.gotTokens;
+  const shape = tokens.length === STRIP_COMMAND_TOKENS.length + 1;
+  const prefixPinned =
+    shape && STRIP_COMMAND_TOKENS.slice(0, 3).every((t, i) => tokens[i] === t);
+  const program = prefixPinned ? (tokens[3] ?? "") : null;
+  if (program !== null) {
+    // Byte-balance the program token against the pinned constant.
+    // The common-prefix length is the byte offset in STRING indices
+    // (the program is pure ASCII — the `\xEF\xBB\xBF` BOM is
+    // literal escape TEXT, index == byte). The common-suffix trim
+    // is BOUNDED by `min(len) - prefix` — an unbounded suffix loop
+    // hangs on identical strings.
+    let prefix = 0;
+    const minLen = Math.min(program.length, BODY_STRIP.length);
+    while (prefix < minLen && program[prefix] === BODY_STRIP[prefix]) {
+      prefix++;
+    }
+    let suffix = 0;
+    const bound = minLen - prefix;
+    while (
+      suffix < bound &&
+      program[program.length - 1 - suffix] ===
+        BODY_STRIP[BODY_STRIP.length - 1 - suffix]
+    ) {
+      suffix++;
+    }
+    const expectedSpan = BODY_STRIP.slice(prefix, BODY_STRIP.length - suffix);
+    const gotSpan = program.slice(prefix, program.length - suffix);
+    const fallback =
+      (expectedSpan === "" && gotSpan === "") ||
+      expectedSpan.length > FULL_LINE_FALLBACK_RATIO * BODY_STRIP.length ||
+      gotSpan.length > FULL_LINE_FALLBACK_RATIO * program.length;
+    if (!fallback) {
+      return [
+        `substitution program diverges from the pinned strip at byte ${prefix}:`,
+        `  - expected: ${expectedSpan}`,
+        `  + got:      ${gotSpan}`,
+      ].join("\n");
     }
   }
-  return lines.join("\n");
+  return [
+    "substitution inner command deviates from the pinned strip:",
+    `  - expected: perl -0777 -pe '${BODY_STRIP}' <path>`,
+    `  + got:      ${tokens.map(quoteIfSpaced).join(" ")}`,
+  ].join("\n");
 }
 
-/** The `core`-stage diagnostic: one byte pair, or the full-line pair. */
-function renderCore(detail: CoreDiffDetail): string {
-  if (detail.kind === "program") {
-    return [
-      `substitution program diverges from the pinned strip at byte ${detail.offset}:`,
-      `  - expected: ${detail.expectedSpan}`,
-      `  + got:      ${detail.gotSpan}`,
-    ].join("\n");
-  }
-  return [
-    "substitution inner command diverges from the pinned strip:",
-    `  - expected: ${detail.expectedText}`,
-    `  + got:      ${detail.gotText}`,
-  ].join("\n");
+/** Quote a display token when it contains whitespace (keeps the got line re-readable as a command). */
+function quoteIfSpaced(token: string): string {
+  return /\s/.test(token) ? `'${token.replace(/'/g, `"'"`)}'` : token;
 }
 
 /**
