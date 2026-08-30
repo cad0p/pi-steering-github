@@ -115,6 +115,8 @@ then cd into the foreign repo and target it from there.
 
 FORM + vault-path check — the substitution must be the pinned form AND the file argument must resolve to a real file inside a napkin vault, under a `<repo>/<section>/` directory (`<repo>` = origin URL basename, cwd-folder fallback). Fail-closed: anything unverifiable (missing flag, unparsable form, walker-unknown cwd, nonexistent path, outside a vault, wrong section/repo) counts as missing. The `<repo>/<section>/` convention is both taught by the rule's reason and enforced here. The closing-keyword content check belongs to `pr-create-needs-issue-link` (responsibility separation). Why vault body files: they are reviewable, persistent, and kb-discoverable — the body is written and reviewed *before* the command runs, so the PR description is a deliberate artifact rather than an inline afterthought. Since #41 the anchor covers ANY number of leading flag(+value) pairs (`gh --hostname h pr create …` routes), so a command released by the foreign gate lands here instead of bypassing the policy.
 
+Since #43 a deviating inner command carries a byte-diff diagnostic: a mutated strip program reports the divergent core spans with the byte offset (`substitution program diverges from the pinned strip at byte 129: - expected: *)? / + got: ?)*`), anything else (`cat`, `sed`, extra/missing tokens) shows the two full command lines — always followed by the canonical recipe, so the block message stays actionable.
+
 ### `pr-create-needs-issue-link`
 
 `gh pr create|new` must carry a closing keyword (`close`/`closes`/`closed`, `fix`/`fixes`/`fixed`, `resolve`/`resolves`/`resolved`) + `#N` in **both** the inline `--title` value and the body. The body normally comes from the vault body file, so the check reads the file content (falling back to inline `--body` text).
@@ -132,7 +134,7 @@ Since #41 the anchor covers ANY number of leading flag(+value) pairs (`gh -v -R 
 
 ### `issue-body-from-vault-file`
 
-`gh issue create|edit` must take the body from the same pinned perl substitution form (`--body-file <(perl -0777 -pe '<BODY_STRIP>' <file>)`). No keyword requirement — issues close nothing. Since #41 the anchor covers ANY number of leading flag(+value) pairs, so gate-released flag-first invocations land here.
+`gh issue create|edit` must take the body from the same pinned perl substitution form (`--body-file <(perl -0777 -pe '<BODY_STRIP>' <file>)`). No keyword requirement — issues close nothing. Since #41 the anchor covers ANY number of leading flag(+value) pairs, so gate-released flag-first invocations land here. Shares the pr rule's dynamic byte-diff block reason (same `explainBodyFileArg` tag + `renderBodyFileDiff` helper — the two rules' diagnostics can never drift).
 
 ### The pinned frontmatter-strip one-liner
 
@@ -204,7 +206,9 @@ When the built-in predicate isn't enough, reach for the exported helpers inside 
 
 - `findFlagValue(ctx, flags)` — value of the first occurrence of a flag (space or `=` form), unquoted.
 - `findBodyFileValue(ctx)` — value of the first `--body-file` / `-F` occurrence (`""` when absent); handles the walker-split glued form `--body-file=<(...)`.
-- `parseBodyFileArg(word)` — classify a body-file value word: `{ kind: "substitution", vaultPath }` \| `{ kind: "direct", path }` \| `null`.
+- `explainBodyFileArg(word)` — classify a body-file value word into five tags: `missing` \| `direct` \| `form` \| `ok` \| `diff` (the single source of truth behind the predicate verdict AND the rules' dynamic byte-diff reason).
+- `parseBodyFileArg(word)` — the pinned-substitution pin: `{ kind: "substitution", vaultPath }` \| `{ kind: "direct", path }` \| `null`.
+- `renderBodyFileDiff(word)` — the byte-diff diagnostic for the two body-file rules: byte pair when a diverging program token is close to the pinned strip, the two full command lines otherwise (always followed by the canonical static recipe).
 - `resolveAgainstCwd(ctx, path)` — resolve a path against the command's effective cwd (`null` on walker-unknown cwd).
 - `bodyHasClosingKeyword(ctx)` — does the body (stripped vault body-file content, or inline `--body`) carry a closing-keyword ref?
 - `isInfoOnly(args, extraFlags?)` from `@cad0p/pi-steering-flags` — token-level info-only check for `--help`/`--version` plus additive CLI-specific flags such as `-h`; quote-aware, including attached forms.

@@ -204,12 +204,18 @@ function hostOnMainGithub(): ReturnType<typeof createRecordingHost> {
  * Evaluate a bash command at a given cwd. Uses a fresh host + ctx per
  * call so exec state doesn't leak across assertions. The cwd must be
  * a REAL directory — the vault predicate walks the filesystem.
+ * Returns the raw block reason too (for the dynamic byte-diff
+ * diagnostic pins, #43).
  */
 async function evaluateBash(
   cwd: string,
   command: string,
   host: ReturnType<typeof createRecordingHost> = hostOnMainGithub(),
-): Promise<{ block: boolean; rule: string | null | undefined }> {
+): Promise<{
+  block: boolean;
+  rule: string | null | undefined;
+  reason: string;
+}> {
   const ctx = mockExtensionContext(cwd, host.entries);
   const harness = loadHarness({ config, host, includeDefaults: true });
   const event = {
@@ -220,12 +226,12 @@ async function evaluateBash(
   } as unknown as Parameters<typeof harness.evaluate>[0];
   const result = await harness.evaluate(event, ctx, 1);
   if (result === undefined || result === null || result.block !== true) {
-    return { block: false, rule: null };
+    return { block: false, rule: null, reason: "" };
   }
   const raw = result.reason ?? "";
   const reason = typeof raw === "string" ? raw : String(raw);
   const match = reason.match(/^\[steering:([^@\]]+)(?:@[^\]]+)?\]/);
-  return { block: true, rule: match ? match[1] : null };
+  return { block: true, rule: match ? match[1] : null, reason };
 }
 
 describe("github plugin — shape", () => {
@@ -365,6 +371,68 @@ describe("github plugin — PR rules (issue-link + vault body-file policy)", () 
     );
     assert.equal(block, true, "expected block");
     assert.equal(rule, "pr-body-from-vault-file");
+  });
+
+  it("blocks pr edit with a mutated strip program and reports the byte-exact divergence (#43)", async () => {
+    // The pi#8845 incident: a 2-char swap (*)? → ?)*) at byte 129 of
+    // 135 — the static reason could not show it; the dynamic reason
+    // pins the byte offset and the divergent core spans.
+    const fx = makeVaultRepoFixture(repo);
+    const mutatedProgram =
+      BODY_STRIP.slice(0, 129) + "?)*" + BODY_STRIP.slice(132);
+    const { block, rule, reason } = await evaluateBash(
+      makeFixtureDir(),
+      `gh pr edit 46 --body-file <(perl -0777 -pe '${mutatedProgram}' "${fx.prBodyFile}")`,
+      host,
+    );
+    assert.equal(block, true, "expected block");
+    assert.equal(rule, "pr-body-from-vault-file");
+    assert.ok(reason.includes("at byte 129"), `reason: ${reason}`);
+    assert.ok(reason.includes("- expected: *)?"), `reason: ${reason}`);
+    assert.ok(reason.includes("+ got:      ?)*"), `reason: ${reason}`);
+  });
+
+  it("blocks pr edit with a cat inner command and reports the full-line got (#43)", async () => {
+    const fx = makeVaultRepoFixture(repo);
+    const { block, rule, reason } = await evaluateBash(
+      makeFixtureDir(),
+      `gh pr edit 46 --body-file <(cat "${fx.prBodyFile}")`,
+      host,
+    );
+    assert.equal(block, true, "expected block");
+    assert.equal(rule, "pr-body-from-vault-file");
+    assert.ok(reason.includes("+ got:      cat "), `reason: ${reason}`);
+    assert.ok(
+      reason.includes(
+        "substitution inner command deviates from the pinned strip:",
+      ),
+      `reason: ${reason}`,
+    );
+  });
+
+  it("byte-exact substitution keeps blocking via the vault check with the STATIC reason (#43)", async () => {
+    // Form byte-perfect → ok stage → no diagnostic, the static
+    // recipe verbatim — the vault-path check is what blocks here.
+    const outside = makeFixtureDir();
+    const bodyFile = join(outside, "body.md");
+    writeFileSync(bodyFile, "Closes #12\n");
+    const { block, rule, reason } = await evaluateBash(
+      makeFixtureDir(),
+      `gh pr edit 46 --body-file ${stripSubstitution(bodyFile)}`,
+      host,
+    );
+    assert.equal(block, true, "expected block");
+    assert.equal(rule, "pr-body-from-vault-file");
+    assert.ok(
+      reason.includes(
+        "PR bodies must come from a body file in the napkin vault:",
+      ),
+      `reason: ${reason}`,
+    );
+    assert.ok(
+      !reason.includes("substitution program diverges"),
+      `reason must stay static for byte-exact forms: ${reason}`,
+    );
   });
 
   it("blocks pr create with a substitution pointing OUTSIDE any vault", async () => {

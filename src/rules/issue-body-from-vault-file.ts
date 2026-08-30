@@ -15,11 +15,30 @@
  * here instead of bypassing the policy.
  *
  * Strict — no override (schema default).
+ *
+ * Since #43 the `reason` is a dynamic `ReasonFn` (same shared
+ * diagnostic as `pr-body-from-vault-file` — both rules consume the
+ * SAME `explainBodyFileArg` tag + `renderBodyFileDiff` helper, so
+ * the byte-diff format can never drift between them).
  */
 
 import type { Rule } from "@cad0p/pi-steering";
 import { BODY_STRIP } from "../helpers/body-strip.ts";
+import {
+  explainBodyFileArg,
+  findBodyFileValue,
+  renderBodyFileDiff,
+} from "../helpers/pattern-args.ts";
 import { ISSUE_BODY_ANCHOR } from "../helpers/patterns.ts";
+
+/** The canonical static recipe (byte-identity pinned in `index.test.ts`). */
+const STATIC =
+  `Issue bodies must come from a body file in the napkin vault:\n` +
+  `  gh issue create --title "..." --body-file ` +
+  `<(perl -0777 -pe '${BODY_STRIP}' ` +
+  `<vault>/**/<repo>/issues/YYYY-MM-DD-issue<N>-<slug>.md)\n` +
+  `- If foreign issue: cd to the repo you want to file the issue; ` +
+  `REQUIREMENT: have a foreign subagent maintainer loop before filing`;
 
 export const issueBodyFromVaultFile = {
   name: "issue-body-from-vault-file",
@@ -27,11 +46,10 @@ export const issueBodyFromVaultFile = {
   field: "command",
   pattern: ISSUE_BODY_ANCHOR,
   when: { missingVaultBodyFile: { section: "issues" } },
-  reason:
-    `Issue bodies must come from a body file in the napkin vault:\n` +
-    `  gh issue create --title "..." --body-file ` +
-    `<(perl -0777 -pe '${BODY_STRIP}' ` +
-    `<vault>/**/<repo>/issues/YYYY-MM-DD-issue<N>-<slug>.md)\n` +
-    `- If foreign issue: cd to the repo you want to file the issue; ` +
-    `REQUIREMENT: have a foreign subagent maintainer loop before filing`,
+  reason: (ctx) => {
+    const v = findBodyFileValue(ctx);
+    return explainBodyFileArg(v) === "diff"
+      ? `${renderBodyFileDiff(v)}\n\n${STATIC}`
+      : STATIC;
+  },
 } as const satisfies Rule;

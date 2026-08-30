@@ -11,6 +11,13 @@
  * predicate interpolate it at module load and byte-pin it in the
  * tokenizer) so consumers can keep importing it from a single
  * helpers path.
+ *
+ * `--body-file` classification is ONE pure helper,
+ * `explainBodyFileArg` (five tags, no union, no payloads); the
+ * diagnostic is a byte-equality check plus one diff
+ * (`renderBodyFileDiff`). The vault predicate and both rules'
+ * dynamic block-reason fn consume the SAME helper + value, so the
+ * verdict and the diagnostic can never drift.
  */
 
 import { isAbsolute, resolve } from "node:path";
@@ -110,6 +117,25 @@ export type BodyFileArg =
   | { kind: "substitution"; path: string }
   | { kind: "direct"; path: string };
 
+// ---------------------------------------------------------------------------
+// `--body-file` value classification + the byte-diff diagnostic
+// ---------------------------------------------------------------------------
+
+/**
+ * Classify a `--body-file` value word (pure — no ctx, no fs):
+ * `missing` | `direct` | `form` | `ok` | `diff`. The predicate and
+ * both rules' `reason` fn consume the SAME value, so verdict and
+ * diagnostic can never drift.
+ */
+export function explainBodyFileArg(
+  v: string,
+): "missing" | "direct" | "form" | "ok" | "diff" {
+  if (v === "") return "missing";
+  if (!v.startsWith("<(")) return "direct";
+  if (!v.endsWith(")")) return "form";
+  return parseBodyFileArg(v) !== null ? "ok" : "diff";
+}
+
 /**
  * Classify a `--body-file` value word. `null` = unparsable (fail
  * closed by the callers).
@@ -146,6 +172,74 @@ export function parseBodyFileArg(word: string): BodyFileArg | null {
   }
   if (word !== "") return { kind: "direct", path: word };
   return null;
+}
+
+/**
+ * The `diff` diagnostic: pinned shape (5 tokens, first three
+ * pinned) with a diverging program token → the divergent core with
+ * the byte offset; otherwise the two full command lines.
+ */
+export function renderBodyFileDiff(v: string): string {
+  const tokens = tokenizeInner(v.slice(2, -1).trim());
+  const shape = tokens.length === STRIP_COMMAND_TOKENS.length + 1;
+  const prefixPinned =
+    shape && STRIP_COMMAND_TOKENS.slice(0, 3).every((t, i) => tokens[i] === t);
+  const program = prefixPinned ? (tokens[3] ?? "") : null;
+  if (program !== null) {
+    const pair = corePair(program, BODY_STRIP);
+    if (pair !== null) {
+      return [
+        `substitution program diverges from the pinned strip at byte ${pair.offset}:`,
+        `  - expected: ${pair.exp}`,
+        `  + got:      ${pair.g}`,
+      ].join("\n");
+    }
+  }
+  return [
+    "substitution inner command deviates from the pinned strip:",
+    `  - expected: perl -0777 -pe '${BODY_STRIP}' <path>`,
+    `  + got:      ${tokens.map(quoteForDisplay).join(" ")}`,
+  ].join("\n");
+}
+
+/**
+ * The divergent core of `got` vs `expected`: trim the common
+ * prefix, then the common suffix — BOUNDED by `min(len) - prefix`
+ * (an unbounded loop hangs on identical strings) — and return the
+ * remaining spans plus the byte offset. `null` when both spans are
+ * empty (identical programs — the `sed -0777 -pe '<pinned>' file`
+ * case) or either span > 60% of its own string (strict `>`).
+ */
+function corePair(
+  got: string,
+  expected: string,
+): { offset: number; exp: string; g: string } | null {
+  const minLen = Math.min(got.length, expected.length);
+  let prefix = 0;
+  while (prefix < minLen && got[prefix] === expected[prefix]) prefix++;
+  let suffix = 0;
+  while (
+    suffix < minLen - prefix &&
+    got[got.length - 1 - suffix] === expected[expected.length - 1 - suffix]
+  ) {
+    suffix++;
+  }
+  const exp = expected.slice(prefix, expected.length - suffix);
+  const g = got.slice(prefix, got.length - suffix);
+  if (
+    (exp === "" && g === "") ||
+    exp.length > 0.6 * expected.length ||
+    g.length > 0.6 * got.length
+  ) {
+    return null;
+  }
+  return { offset: prefix, exp, g };
+}
+
+/** Quote a display token when it contains whitespace (keeps the got line re-readable as a command). */
+function quoteForDisplay(token: string): string {
+  if (!/\s/.test(token)) return token;
+  return token.includes("'") ? `"${token}"` : `'${token}'`;
 }
 
 // ---------------------------------------------------------------------------
