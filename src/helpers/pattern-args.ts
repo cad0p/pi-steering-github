@@ -11,6 +11,13 @@
  * predicate interpolate it at module load and byte-pin it in the
  * tokenizer) so consumers can keep importing it from a single
  * helpers path.
+ *
+ * `--body-file` classification is centralized in ONE pure helper,
+ * `explainBodyFileArg` — the `parseBodyFileArg` wrapper, the vault
+ * predicate, and both rules' dynamic block-reason function consume
+ * it, so the predicate verdict and the diagnostic can never
+ * drift. The stages: `missing` | `direct` | `form` | `ok` |
+ * `tokens` | `core` (see `BodyFileExplain`).
  */
 
 import { isAbsolute, resolve } from "node:path";
@@ -110,6 +117,249 @@ export type BodyFileArg =
   | { kind: "substitution"; path: string }
   | { kind: "direct"; path: string };
 
+// ---------------------------------------------------------------------------
+// `--body-file` value classification + byte-diff diagnostics
+// ---------------------------------------------------------------------------
+
+/**
+ * Stage payload of `explainBodyFileArg` — the single classification
+ * behind `parseBodyFileArg`, the vault predicate, and both
+ * body-file rules' dynamic block reason (one source of truth, no
+ * drift between verdict and diagnostic):
+ *
+ *   - `missing` — empty value (no `--body-file` at all).
+ *   - `direct` — a plain path word (not a `<( … )` substitution;
+ *     feeds the `parseBodyFileArg` wrapper for the disabled-rules
+ *     keyword fallback).
+ *   - `form` — starts `<(` but has no closing `)` (unclosed form).
+ *   - `ok` — exactly `perl -0777 -pe <BODY_STRIP> <path>` (5
+ *     tokens, 4 pinned, path non-empty — `tokenizeInner` never
+ *     emits empty tokens).
+ *   - `tokens` — token count ≠ 5: positional mismatch report
+ *     (extra tokens beyond the shorter list are unexpected, missing
+ *     ones expected-but-absent).
+ *   - `core` — count = 5 but any of tokens[0..3] ≠ pinned: the
+ *     program token vs `BODY_STRIP` is byte-balanced into one
+ *     `- expected:` / `+ got:` span pair (`kind: "program"`), or —
+ *     when the remaining core is empty (flags differ but the
+ *     program is identical) or a span exceeds 60% of its own
+ *     string — the full inner-command lines (`kind: "command"`).
+ */
+export type BodyFileExplain =
+  | { stage: "missing" }
+  | { stage: "direct"; detail: { kind: "direct"; path: string } }
+  | { stage: "form" }
+  | { stage: "ok"; detail: { kind: "substitution"; path: string } }
+  | { stage: "tokens"; detail: { expected: string[]; got: string[] } }
+  | { stage: "core"; detail: CoreDiffDetail };
+
+/**
+ * The `core`-stage diff detail. `kind: "program"` = the byte
+ * pair inside the program token (`offset` = common-prefix length in
+ * STRING indices — the pinned program is pure ASCII, so index ==
+ * byte; never Buffer-decode or re-interpret the `\xEF\xBB\xBF`
+ * escape text). `kind: "command"` = the full inner-command lines
+ * (tokens 0..3, the path argument excluded).
+ */
+export type CoreDiffDetail =
+  | {
+      kind: "program";
+      offset: number;
+      expectedSpan: string;
+      gotSpan: string;
+    }
+  | {
+      kind: "command";
+      expectedText: string;
+      gotText: string;
+    };
+
+/**
+ * Span-to-string fallback ratio for the `core` stage: when either
+ * remaining span exceeds this fraction of ITS OWN string's length
+ * (strict `>`), the pair is useless and the renderer falls back to
+ * the full-line command pair. Measured on spans vs their own
+ * strings, never a span vs itself.
+ */
+export const FULL_LINE_FALLBACK_RATIO = 0.6;
+
+/**
+ * Classify a `--body-file` value word into an explainable stage
+ * (pure — no ctx, no fs). `parseBodyFileArg` is a thin wrapper over
+ * this; the vault predicate and both rules' `reason` fn consume it
+ * with the SAME value, so the verdict and the diagnostic can never
+ * drift.
+ */
+export function explainBodyFileArg(value: string): BodyFileExplain {
+  if (value === "") return { stage: "missing" };
+  if (value.startsWith("<(")) {
+    if (!value.endsWith(")")) return { stage: "form" };
+    const tokens = tokenizeInner(value.slice(2, -1).trim());
+    if (tokens.length === STRIP_COMMAND_TOKENS.length + 1) {
+      let pinned = true;
+      for (let i = 0; i < STRIP_COMMAND_TOKENS.length; i++) {
+        if (tokens[i] !== STRIP_COMMAND_TOKENS[i]) {
+          pinned = false;
+          break;
+        }
+      }
+      if (pinned) {
+        const path = tokens[STRIP_COMMAND_TOKENS.length];
+        // `tokenizeInner` never emits empty tokens — keep the guard
+        // for parity with the wrapper's contract.
+        if (path !== undefined && path !== "") {
+          return { stage: "ok", detail: { kind: "substitution", path } };
+        }
+      }
+      return explainCore(tokens);
+    }
+    return {
+      stage: "tokens",
+      detail: {
+        expected: [...STRIP_COMMAND_TOKENS, "<path>"],
+        got: tokens,
+      },
+    };
+  }
+  return { stage: "direct", detail: { kind: "direct", path: value } };
+}
+
+/**
+ * Byte-balance the program token against the pinned constant and
+ * pick the `core` detail shape. The common-prefix length is the
+ * byte offset in STRING indices (the program is pure ASCII — the
+ * `\xEF\xBB\xBF` BOM is literal escape TEXT, index == byte). The
+ * common-suffix trim is BOUNDED by `min(len) - prefix` — an
+ * unbounded suffix loop hangs on identical strings. The ONE pair
+ * covers every edit that survives the prefix/suffix trim; an empty
+ * core (identical programs, differing flags) or an oversized span
+ * (> 60% of either program) falls back to the full-line command
+ * pair (`sed …`, `perl -pe …`, `$VAR` programs, far-apart edits).
+ */
+function explainCore(tokens: string[]): BodyFileExplain {
+  const program = tokens[STRIP_COMMAND_TOKENS.length - 1] ?? "";
+  let prefix = 0;
+  const minLen = Math.min(program.length, BODY_STRIP.length);
+  while (prefix < minLen && program[prefix] === BODY_STRIP[prefix]) prefix++;
+  let suffix = 0;
+  const bound = minLen - prefix;
+  while (
+    suffix < bound &&
+    program[program.length - 1 - suffix] ===
+      BODY_STRIP[BODY_STRIP.length - 1 - suffix]
+  ) {
+    suffix++;
+  }
+  const expectedSpan = BODY_STRIP.slice(prefix, BODY_STRIP.length - suffix);
+  const gotSpan = program.slice(prefix, program.length - suffix);
+  const fallback =
+    (expectedSpan === "" && gotSpan === "") ||
+    expectedSpan.length > FULL_LINE_FALLBACK_RATIO * BODY_STRIP.length ||
+    gotSpan.length > FULL_LINE_FALLBACK_RATIO * program.length;
+  if (fallback) {
+    return {
+      stage: "core",
+      detail: {
+        kind: "command",
+        expectedText: `perl -0777 -pe '${BODY_STRIP}'`,
+        gotText: renderJoined(tokens.slice(0, STRIP_COMMAND_TOKENS.length)),
+      },
+    };
+  }
+  return {
+    stage: "core",
+    detail: { kind: "program", offset: prefix, expectedSpan, gotSpan },
+  };
+}
+
+/**
+ * Re-quote a display token for the joined `got` lines: tokens
+ * containing whitespace are wrapped in single quotes, or double
+ * quotes when they contain a single quote. NB the pinned program
+ * itself contains ONE real space (the `[ \t]` character class), so
+ * a got-line program renders quoted — the paired lines stay
+ * readable and symmetric with the quoted expected recipe.
+ */
+function renderToken(token: string): string {
+  if (/\s/.test(token)) {
+    return token.includes("'") ? `"${token}"` : `'${token}'`;
+  }
+  return token;
+}
+
+/** Space-join tokens for display, re-quoting whitespace-bearing ones. */
+function renderJoined(tokens: readonly string[]): string {
+  return tokens.map(renderToken).join(" ");
+}
+
+/**
+ * Render a body-file rule's block reason from its explain stage:
+ * `missing` / `direct` / `form` / `ok` return `staticReason`
+ * byte-for-byte (the ok stage fires only via the vault-path check,
+ * which is not the substitution-shape diagnostic's job); `tokens` /
+ * `core` prepend the diagnostic (raw bytes, `String.slice` + join
+ * only) and append the rule's canonical static reason after a blank
+ * line so the message stays actionable.
+ */
+export function renderBodyFileExplain(
+  explained: BodyFileExplain,
+  staticReason: string,
+): string {
+  switch (explained.stage) {
+    case "missing":
+    case "direct":
+    case "form":
+    case "ok":
+      return staticReason;
+    case "tokens":
+      return `${renderTokens(explained.detail)}\n\n${staticReason}`;
+    case "core":
+      return `${renderCore(explained.detail)}\n\n${staticReason}`;
+  }
+}
+
+/** The `tokens`-stage diagnostic: full-line pair + per-position detail. */
+function renderTokens(detail: { expected: string[]; got: string[] }): string {
+  const lines = [
+    "substitution inner command deviates from the pinned strip:",
+    `  - expected: perl -0777 -pe '${BODY_STRIP}' <path>`,
+    `  + got:      ${renderJoined(detail.got)}`,
+  ];
+  const positions = Math.max(detail.expected.length, detail.got.length);
+  for (let i = 0; i < positions; i++) {
+    const expected = detail.expected[i];
+    const got = detail.got[i];
+    if (expected !== undefined && got !== undefined) {
+      if (expected !== got) {
+        lines.push(
+          `  token mismatch at position ${i}: expected \`${expected}\`, got \`${got}\``,
+        );
+      }
+    } else if (got !== undefined) {
+      lines.push(`  unexpected token at position ${i}: \`${got}\``);
+    } else {
+      lines.push(`  missing expected token at position ${i}: \`${expected}\``);
+    }
+  }
+  return lines.join("\n");
+}
+
+/** The `core`-stage diagnostic: one byte pair, or the full-line pair. */
+function renderCore(detail: CoreDiffDetail): string {
+  if (detail.kind === "program") {
+    return [
+      `substitution program diverges from the pinned strip at byte ${detail.offset}:`,
+      `  - expected: ${detail.expectedSpan}`,
+      `  + got:      ${detail.gotSpan}`,
+    ].join("\n");
+  }
+  return [
+    "substitution inner command diverges from the pinned strip:",
+    `  - expected: ${detail.expectedText}`,
+    `  + got:      ${detail.gotText}`,
+  ].join("\n");
+}
+
 /**
  * Classify a `--body-file` value word. `null` = unparsable (fail
  * closed by the callers).
@@ -122,29 +372,16 @@ export type BodyFileArg =
  * `cat`, a different perl invocation, extra flags, missing path, …)
  * is unparsable — either it would not strip at all or the pinned
  * behavior could not be guaranteed.
+ *
+ * Thin wrapper over `explainBodyFileArg`: maps BOTH the `ok` and
+ * the `direct` stage to their parsed result, `null` on every other
+ * stage (`missing` / `form` / `tokens` / `core`).
  */
 export function parseBodyFileArg(word: string): BodyFileArg | null {
-  if (word.startsWith("<(")) {
-    if (!word.endsWith(")")) return null;
-    const tokens = tokenizeInner(word.slice(2, -1).trim());
-    if (tokens.length === STRIP_COMMAND_TOKENS.length + 1) {
-      let pinned = true;
-      for (let i = 0; i < STRIP_COMMAND_TOKENS.length; i++) {
-        if (tokens[i] !== STRIP_COMMAND_TOKENS[i]) {
-          pinned = false;
-          break;
-        }
-      }
-      if (pinned) {
-        const path = tokens[STRIP_COMMAND_TOKENS.length];
-        if (path !== undefined && path !== "") {
-          return { kind: "substitution", path };
-        }
-      }
-    }
-    return null;
+  const explained = explainBodyFileArg(word);
+  if (explained.stage === "ok" || explained.stage === "direct") {
+    return explained.detail;
   }
-  if (word !== "") return { kind: "direct", path: word };
   return null;
 }
 

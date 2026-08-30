@@ -3,8 +3,9 @@
 
 /**
  * Unit tests for the arg helpers (`unquote`, `findFlagValue`,
- * `findBodyFileValue`, `parseBodyFileArg`, `resolveAgainstCwd`) and
- * their scaffolding.
+ * `findBodyFileValue`, `parseBodyFileArg`, `explainBodyFileArg`,
+ * `renderBodyFileExplain`, `resolveAgainstCwd`) and their
+ * scaffolding.
  */
 
 import assert from "node:assert/strict";
@@ -12,9 +13,11 @@ import { describe, it } from "node:test";
 import type { PredicateContext } from "@cad0p/pi-steering";
 import { BODY_STRIP } from "./body-strip.ts";
 import {
+  explainBodyFileArg,
   findBodyFileValue,
   findFlagValue,
   parseBodyFileArg,
+  renderBodyFileExplain,
   resolveAgainstCwd,
   unquote,
 } from "./pattern-args.ts";
@@ -243,6 +246,380 @@ describe("parseBodyFileArg", () => {
       kind: "direct",
       path: "/vault/prs/note.md",
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// explainBodyFileArg
+// ---------------------------------------------------------------------------
+
+describe("explainBodyFileArg", () => {
+  it("classifies the pinned substitution as ok with the path", () => {
+    assert.deepEqual(
+      explainBodyFileArg(
+        `<(perl -0777 -pe '${BODY_STRIP}' /vault/prs/note.md)`,
+      ),
+      {
+        stage: "ok",
+        detail: { kind: "substitution", path: "/vault/prs/note.md" },
+      },
+    );
+  });
+
+  it("incident byte-swap (`*)?` vs `?)*`) → core program pair at byte 129", () => {
+    // The pi#8845 incident: a 2-char swap at byte 129 of 135 that
+    // the agent could not see with the static reason.
+    const mutatedProgram = `${BODY_STRIP.slice(0, 129)}?)*${BODY_STRIP.slice(132)}`;
+    assert.equal(mutatedProgram.length, BODY_STRIP.length);
+    assert.deepEqual(
+      explainBodyFileArg(
+        `<(perl -0777 -pe '${mutatedProgram}' /vault/prs/note.md)`,
+      ),
+      {
+        stage: "core",
+        detail: {
+          kind: "program",
+          offset: 129,
+          expectedSpan: "*)?",
+          gotSpan: "?)*",
+        },
+      },
+    );
+  });
+
+  it("two edits in the tail region collapse into ONE core pair (offset 124)", () => {
+    // `\r?\n` → `\n?\r` at bytes 123-127 and `*)?` → `?)*` at bytes
+    // 129-131: the combined span (~8 chars) stays far under
+    // FULL_LINE_FALLBACK_RATIO, so both edits show in one pair.
+    const mutatedTail =
+      BODY_STRIP.slice(0, 123) +
+      "\\n?\\r" +
+      BODY_STRIP.slice(128, 129) +
+      "?)*" +
+      BODY_STRIP.slice(132);
+    assert.equal(mutatedTail.length, BODY_STRIP.length);
+    assert.deepEqual(
+      explainBodyFileArg(
+        `<(perl -0777 -pe '${mutatedTail}' /vault/prs/note.md)`,
+      ),
+      {
+        stage: "core",
+        detail: {
+          kind: "program",
+          offset: 124,
+          expectedSpan: "r?\\n)*)?",
+          gotSpan: "n?\\r)?)*",
+        },
+      },
+    );
+  });
+
+  it("far-apart edits (bytes 5 and 130 → ~93% span) fall back to the full-line command", () => {
+    const mutatedFar = `${BODY_STRIP.slice(0, 5)}X${BODY_STRIP.slice(6, 130)}Y${BODY_STRIP.slice(131)}`;
+    assert.equal(mutatedFar.length, BODY_STRIP.length);
+    assert.deepEqual(
+      explainBodyFileArg(
+        `<(perl -0777 -pe '${mutatedFar}' /vault/prs/note.md)`,
+      ),
+      {
+        stage: "core",
+        detail: {
+          kind: "command",
+          expectedText: `perl -0777 -pe '${BODY_STRIP}'`,
+          gotText: `perl -0777 -pe '${mutatedFar}'`,
+        },
+      },
+    );
+  });
+
+  it("cat substitution (2 tokens) → tokens stage with the positional report", () => {
+    assert.deepEqual(explainBodyFileArg("<(cat /vault/prs/note.md)"), {
+      stage: "tokens",
+      detail: {
+        expected: ["perl", "-0777", "-pe", BODY_STRIP, "<path>"],
+        got: ["cat", "/vault/prs/note.md"],
+      },
+    });
+  });
+
+  it("`sed -0777 -pe 'x' file` (5 tokens, tool differs) → core command fallback", () => {
+    // NB the 5-token form — `sed -e 'x' file` is 4 tokens and lands
+    // in the tokens stage instead.
+    const explained = explainBodyFileArg(
+      "<(sed -0777 -pe 'x' /vault/prs/note.md)",
+    );
+    assert.deepEqual(explained, {
+      stage: "core",
+      detail: {
+        kind: "command",
+        expectedText: `perl -0777 -pe '${BODY_STRIP}'`,
+        gotText: "sed -0777 -pe x",
+      },
+    });
+  });
+
+  it("`sed -0777 -pe '<pinned>' file` (identical program, flags differ) → empty core → command fallback", () => {
+    const explained = explainBodyFileArg(
+      `<(sed -0777 -pe '${BODY_STRIP}' /vault/prs/note.md)`,
+    );
+    assert.deepEqual(explained, {
+      stage: "core",
+      detail: {
+        kind: "command",
+        expectedText: `perl -0777 -pe '${BODY_STRIP}'`,
+        gotText: `sed -0777 -pe '${BODY_STRIP}'`,
+      },
+    });
+  });
+
+  it("a `$VAR` program token → core command fallback (unity-span diff is useless)", () => {
+    const explained = explainBodyFileArg(
+      `<(perl -0777 -pe "$VAR" /vault/prs/note.md)`,
+    );
+    assert.deepEqual(explained, {
+      stage: "core",
+      detail: {
+        kind: "command",
+        expectedText: `perl -0777 -pe '${BODY_STRIP}'`,
+        gotText: "perl -0777 -pe $VAR",
+      },
+    });
+  });
+
+  it("missing path (4 tokens) → tokens stage, expected-but-absent <path>", () => {
+    assert.deepEqual(explainBodyFileArg(`<(perl -0777 -pe '${BODY_STRIP}')`), {
+      stage: "tokens",
+      detail: {
+        expected: ["perl", "-0777", "-pe", BODY_STRIP, "<path>"],
+        got: ["perl", "-0777", "-pe", BODY_STRIP],
+      },
+    });
+  });
+
+  it("extra trailing token (6 tokens) → tokens stage with an unexpected token", () => {
+    assert.deepEqual(
+      explainBodyFileArg(
+        `<(perl -0777 -pe '${BODY_STRIP}' /vault/prs/note.md extra)`,
+      ),
+      {
+        stage: "tokens",
+        detail: {
+          expected: ["perl", "-0777", "-pe", BODY_STRIP, "<path>"],
+          got: [
+            "perl",
+            "-0777",
+            "-pe",
+            BODY_STRIP,
+            "/vault/prs/note.md",
+            "extra",
+          ],
+        },
+      },
+    );
+  });
+
+  it("unclosed <( form → form", () => {
+    assert.deepEqual(explainBodyFileArg(`<(perl -0777 -pe '${BODY_STRIP}'`), {
+      stage: "form",
+    });
+  });
+
+  it("plain path → direct stage (wrapper round-trips it)", () => {
+    assert.deepEqual(explainBodyFileArg("/vault/prs/note.md"), {
+      stage: "direct",
+      detail: { kind: "direct", path: "/vault/prs/note.md" },
+    });
+    // The wrapper must map BOTH ok and direct stages to their
+    // parsed result (body-keyword.ts raw-reads direct paths).
+    assert.deepEqual(parseBodyFileArg("/vault/prs/note.md"), {
+      kind: "direct",
+      path: "/vault/prs/note.md",
+    });
+  });
+
+  it("empty value → missing", () => {
+    assert.deepEqual(explainBodyFileArg(""), { stage: "missing" });
+  });
+
+  it("FULL_LINE_FALLBACK_RATIO boundary: an exactly-60% span stays a core pair (strict >)", () => {
+    // Differing span = exactly 0.6 * 135 = 81 chars (prefix 27,
+    // suffix 27) — 81 > 81 is false on both sides, so no fallback.
+    const gotProgram =
+      BODY_STRIP.slice(0, 27) + "x".repeat(81) + BODY_STRIP.slice(108);
+    assert.equal(gotProgram.length, BODY_STRIP.length);
+    assert.deepEqual(
+      explainBodyFileArg(
+        `<(perl -0777 -pe '${gotProgram}' /vault/prs/note.md)`,
+      ),
+      {
+        stage: "core",
+        detail: {
+          kind: "program",
+          offset: 27,
+          expectedSpan: BODY_STRIP.slice(27, 108),
+          gotSpan: "x".repeat(81),
+        },
+      },
+    );
+  });
+
+  it("a span just over the ratio (82/135) falls back to the full-line command", () => {
+    const gotProgram =
+      BODY_STRIP.slice(0, 26) + "x".repeat(82) + BODY_STRIP.slice(108);
+    assert.equal(gotProgram.length, BODY_STRIP.length);
+    assert.deepEqual(
+      explainBodyFileArg(
+        `<(perl -0777 -pe '${gotProgram}' /vault/prs/note.md)`,
+      ),
+      {
+        stage: "core",
+        detail: {
+          kind: "command",
+          expectedText: `perl -0777 -pe '${BODY_STRIP}'`,
+          gotText: `perl -0777 -pe '${gotProgram}'`,
+        },
+      },
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// renderBodyFileExplain
+// ---------------------------------------------------------------------------
+
+describe("renderBodyFileExplain", () => {
+  const staticReason = "STATIC REASON\n";
+
+  it("missing / direct / form / ok stages return the static reason byte-for-byte", () => {
+    const staged = [
+      { stage: "missing" },
+      {
+        stage: "direct",
+        detail: { kind: "direct", path: "/vault/prs/note.md" },
+      },
+      { stage: "form" },
+      {
+        stage: "ok",
+        detail: { kind: "substitution", path: "/vault/prs/note.md" },
+      },
+    ] as const;
+    for (const explained of staged) {
+      assert.equal(
+        renderBodyFileExplain(explained, staticReason),
+        staticReason,
+      );
+    }
+  });
+
+  it("tokens stage → the cat acceptance message (full-line pair + per-position detail)", () => {
+    assert.equal(
+      renderBodyFileExplain(
+        {
+          stage: "tokens",
+          detail: {
+            expected: ["perl", "-0777", "-pe", BODY_STRIP, "<path>"],
+            got: ["cat", "/vault/prs/note.md"],
+          },
+        },
+        staticReason,
+      ),
+      "substitution inner command deviates from the pinned strip:\n" +
+        `  - expected: perl -0777 -pe '${BODY_STRIP}' <path>\n` +
+        "  + got:      cat /vault/prs/note.md\n" +
+        "  token mismatch at position 0: expected `perl`, got `cat`\n" +
+        "  token mismatch at position 1: expected `-0777`, got `/vault/prs/note.md`\n" +
+        "  missing expected token at position 2: `-pe`\n" +
+        `  missing expected token at position 3: \`${BODY_STRIP}\`\n` +
+        "  missing expected token at position 4: `<path>`\n" +
+        "\n" +
+        staticReason,
+    );
+  });
+
+  it("tokens stage re-quotes whitespace-bearing got tokens (single → double quotes when needed)", () => {
+    assert.equal(
+      renderBodyFileExplain(
+        {
+          stage: "tokens",
+          detail: {
+            expected: ["perl", "-0777", "-pe", BODY_STRIP, "<path>"],
+            got: ["cat", "/vault/a b.md", "It's here.md"],
+          },
+        },
+        staticReason,
+      ),
+      "substitution inner command deviates from the pinned strip:\n" +
+        `  - expected: perl -0777 -pe '${BODY_STRIP}' <path>\n` +
+        `  + got:      cat '/vault/a b.md' "It's here.md"\n` +
+        "  token mismatch at position 0: expected `perl`, got `cat`\n" +
+        "  token mismatch at position 1: expected `-0777`, got `/vault/a b.md`\n" +
+        "  token mismatch at position 2: expected `-pe`, got `It's here.md`\n" +
+        `  missing expected token at position 3: \`${BODY_STRIP}\`\n` +
+        "  missing expected token at position 4: `<path>`\n" +
+        "\n" +
+        staticReason,
+    );
+  });
+
+  it("core program stage → the incident byte-diff pair + blank line + static", () => {
+    assert.equal(
+      renderBodyFileExplain(
+        {
+          stage: "core",
+          detail: {
+            kind: "program",
+            offset: 129,
+            expectedSpan: "*)?",
+            gotSpan: "?)*",
+          },
+        },
+        staticReason,
+      ),
+      "substitution program diverges from the pinned strip at byte 129:\n" +
+        "  - expected: *)?\n" +
+        "  + got:      ?)*\n" +
+        "\n" +
+        staticReason,
+    );
+  });
+
+  it("core command stage → the full-line pair + blank line + static", () => {
+    assert.equal(
+      renderBodyFileExplain(
+        {
+          stage: "core",
+          detail: {
+            kind: "command",
+            expectedText: `perl -0777 -pe '${BODY_STRIP}'`,
+            gotText: "sed -0777 -pe x",
+          },
+        },
+        staticReason,
+      ),
+      "substitution inner command diverges from the pinned strip:\n" +
+        `  - expected: perl -0777 -pe '${BODY_STRIP}'\n` +
+        "  + got:      sed -0777 -pe x\n" +
+        "\n" +
+        staticReason,
+    );
+  });
+
+  it("end-to-end: incident mutation classifies AND renders the byte pair", () => {
+    const mutatedProgram = `${BODY_STRIP.slice(0, 129)}?)*${BODY_STRIP.slice(132)}`;
+    const rendered = renderBodyFileExplain(
+      explainBodyFileArg(
+        `<(perl -0777 -pe '${mutatedProgram}' /vault/prs/note.md)`,
+      ),
+      staticReason,
+    );
+    assert.equal(
+      rendered,
+      "substitution program diverges from the pinned strip at byte 129:\n" +
+        "  - expected: *)?\n" +
+        "  + got:      ?)*\n" +
+        "\n" +
+        staticReason,
+    );
   });
 });
 
