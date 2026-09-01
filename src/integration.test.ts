@@ -17,7 +17,9 @@
  * "<file>")` — the walker keeps the substitution's full inner text
  * as one arg word. Blocked commands surface the rule name through
  * the reason-tag convention (`[steering:<rule>@<plugin>]` — the
- * extraction regex accepts both tagged and untagged forms).
+ * extraction regex accepts both tagged and untagged forms, and the
+ * tag may be the first line (pre-preamble steering) or the second
+ * line after the block-reason preamble landed, pi-steering #85).
  */
 
 import assert from "node:assert/strict";
@@ -230,7 +232,11 @@ async function evaluateBash(
   }
   const raw = result.reason ?? "";
   const reason = typeof raw === "string" ? raw : String(raw);
-  const match = reason.match(/^\[steering:([^@\]]+)(?:@[^\]]+)?\]/);
+  // The tag is line 1 on pre-preamble steering (<0.2.0-20260901.0)
+  // and line 2 once the block-reason preamble landed (pi-steering
+  // #85: `…not executed; blocked by a steering rule:\n\n[steering:
+  // <rule>@<source>] …`). Match at a line start for both formats.
+  const match = reason.match(/(?:^|\n)\[steering:([^@\]]+)(?:@[^\]]+)?\]/);
   return { block: true, rule: match ? match[1] : null, reason };
 }
 
