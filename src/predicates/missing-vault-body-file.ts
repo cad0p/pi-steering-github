@@ -33,8 +33,7 @@
  *     body file must live under.
  *
  * The arg helpers it uses (`findFlagValue`, `findBodyFileValue`,
- * `parseBodyFileArg`, `resolveAgainstCwd`, `bodyHasClosingKeyword`,
- * plus the low-level `argText` / `unquote`) live in
+ * `parseBodyFileArg`, `resolveAgainstCwd`, `bodyHasClosingKeyword`) live in
  * `../helpers/` and are re-exported through `./index.ts` for unit
  * tests and `when.condition` escape-hatch use.
  */
