@@ -38,6 +38,10 @@ All notable changes to this project will be documented in this file.
 
 - Fix stale H1-kept comments — the H1 is stripped too (closes #3)
 
+### 🧪 Testing
+
+- Make rule-name extraction tolerant of the block-reason preamble (closes #46) ([#47](https://github.com/cad0p/pi-steering-github/pull/47))
+
 
 ## [Unreleased]
 
