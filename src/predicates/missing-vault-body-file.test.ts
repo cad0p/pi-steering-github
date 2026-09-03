@@ -31,12 +31,15 @@ type ExecStub = (
 
 /**
  * Hand-built predicate ctx. `args` are walker words in `{ text }`
- * form (the shape `argText` reads).
+ * form (the shape `argText` reads). `env` seeds the walker's
+ * tracked env at the command ref (tilde expansion reads it first,
+ * falling back to `process.env` when absent).
  */
 function makeCtx(
   args: readonly { text: string }[],
   cwd: string,
   exec?: ExecStub,
+  env?: ReadonlyMap<string, string>,
 ): PredicateContext {
   const ctx = {
     cwd,
@@ -52,7 +55,7 @@ function makeCtx(
       })),
     appendEntry: () => {},
     findEntries: () => [],
-    walkerState: {},
+    walkerState: env !== undefined ? { cwd, env } : {},
   };
   return ctx as unknown as PredicateContext;
 }
@@ -92,6 +95,25 @@ function makeVaultRepoFixture(repo: string): VaultRepoFixture {
   const issuesDir = join(vault, "open-source", "github", repo, "issues");
   mkdirSync(prsDir, { recursive: true });
   mkdirSync(issuesDir, { recursive: true });
+  const prBodyFile = join(prsDir, `2026-08-14-pr1-${repo}-test.md`);
+  writeFileSync(prBodyFile, "Closes #12\n\n## What\n\nBody text.\n");
+  const issueBodyFile = join(issuesDir, `2026-08-14-issue1-${repo}-test.md`);
+  writeFileSync(issueBodyFile, "## What\n\nIssue body text.\n");
+  return { vault, repo, prBodyFile, issueBodyFile };
+}
+
+/**
+ * A vault fixture rooted at `root` (for tilde pins the root stands
+ * in as HOME via the tracked env — the vault resolves through the
+ * expanded `~/…` path exactly like the real Goldmine layout).
+ */
+function makeVaultRepoFixtureAt(root: string, repo: string): VaultRepoFixture {
+  const vault = join(root, "Goldmine");
+  const prsDir = join(vault, "open-source", "github", repo, "prs");
+  const issuesDir = join(vault, "open-source", "github", repo, "issues");
+  mkdirSync(prsDir, { recursive: true });
+  mkdirSync(issuesDir, { recursive: true });
+  mkdirSync(join(vault, ".napkin"), { recursive: true });
   const prBodyFile = join(prsDir, `2026-08-14-pr1-${repo}-test.md`);
   writeFileSync(prBodyFile, "Closes #12\n\n## What\n\nBody text.\n");
   const issueBodyFile = join(issuesDir, `2026-08-14-issue1-${repo}-test.md`);
@@ -240,6 +262,106 @@ describe("missingVaultBodyFile", () => {
   it("fires for a bare --body-file with no value (fail-closed)", async () => {
     const ctx = makeCtx([{ text: "--body-file" }], "/work/repo");
     assert.equal(await missingVaultBodyFile({ section: "prs" }, ctx), true);
+  });
+
+  it("does NOT fire for a bare ~/… vault path (tracked HOME expands it)", async () => {
+    // The shell would expand the leading `~` before perl ever sees
+    // the word — blocking it was the over-block: the typed command
+    // works, so the rule allows it.
+    const home = makeFixtureDir();
+    const fx = makeVaultRepoFixtureAt(home, "fixture-repo");
+    const tildePath = `~${fx.issueBodyFile.slice(home.length)}`;
+    assert.ok(tildePath.startsWith("~/"), tildePath);
+    const ctx = makeCtx(
+      [{ text: "--body-file" }, { text: stripSubstitution(tildePath) }],
+      "/work/fixture-repo",
+      gitRemoteExec("https://github.com/cad0p/fixture-repo.git"),
+      new Map([["HOME", home]]),
+    );
+    assert.equal(await missingVaultBodyFile({ section: "issues" }, ctx), false);
+    const d = await diagnose(ctx, "issues");
+    assert.equal(d.abs, fx.issueBodyFile);
+    assert.equal(d.exists, true);
+    assert.equal(d.blocked, false);
+  });
+
+  it('fires for a quoted "~/…" vault path (quotes suppress expansion)', async () => {
+    // Bash-exact: the quoted tilde stays literal, joins onto the
+    // cwd, and fails exists — fail-closed with the literal path in
+    // the trace.
+    const home = makeFixtureDir();
+    const fx = makeVaultRepoFixtureAt(home, "fixture-repo");
+    const tildePath = `~${fx.issueBodyFile.slice(home.length)}`;
+    const cwd = makeFixtureDir();
+    const ctx = makeCtx(
+      [{ text: "--body-file" }, { text: stripSubstitution(`"${tildePath}"`) }],
+      cwd,
+      gitRemoteExec("https://github.com/cad0p/fixture-repo.git"),
+      new Map([["HOME", home]]),
+    );
+    assert.equal(await missingVaultBodyFile({ section: "issues" }, ctx), true);
+    const d = await diagnose(ctx, "issues");
+    assert.equal(d.path, tildePath);
+    assert.ok(d.abs?.endsWith(tildePath), d.abs ?? "null abs");
+    assert.equal(d.exists, false);
+    assert.equal(d.blocked, true);
+  });
+
+  it("fires for a `<`-plus-tilde typo (the mirror indicts the `<`)", async () => {
+    // `<` is not a tilde — no expansion applies; the opaque token
+    // joins onto the cwd and fails exists, with the `<` mirrored.
+    const cwd = makeFixtureDir();
+    const typoPath = "<~/Goldmine/personal/github/pcad.it-infra/issues/note.md";
+    const ctx = makeCtx(
+      [
+        { text: "--body-file" },
+        {
+          text: `<(perl -0777 -pe '${BODY_STRIP}' ${typoPath})`,
+        },
+      ],
+      cwd,
+    );
+    assert.equal(await missingVaultBodyFile({ section: "issues" }, ctx), true);
+    const d = await diagnose(ctx, "issues");
+    assert.equal(d.path, typoPath);
+    assert.equal(d.exists, false);
+    assert.equal(d.blocked, true);
+  });
+
+  it("fires for ~/… when HOME is unknown (fail-closed, explicit trace)", async () => {
+    const ctx = makeCtx(
+      [
+        { text: "--body-file" },
+        { text: stripSubstitution("~/Goldmine/note.md") },
+      ],
+      "/work/repo",
+      undefined,
+      new Map(),
+    );
+    assert.equal(await missingVaultBodyFile({ section: "prs" }, ctx), true);
+    const d = await diagnose(ctx, "prs");
+    assert.equal(d.path, "~/Goldmine/note.md");
+    assert.equal(d.cwd, "/work/repo");
+    assert.equal(d.abs, null);
+    assert.equal(d.blocked, true);
+  });
+
+  it("fires for ~user/… (passes through, resolves literally — unchanged)", async () => {
+    // Documented upstream limit: no new behavior — the token joins
+    // onto the cwd and fails exists.
+    const cwd = makeFixtureDir();
+    const ctx = makeCtx(
+      [
+        { text: "--body-file" },
+        { text: stripSubstitution("~other/Goldmine/note.md") },
+      ],
+      cwd,
+    );
+    assert.equal(await missingVaultBodyFile({ section: "prs" }, ctx), true);
+    const d = await diagnose(ctx, "prs");
+    assert.equal(d.abs, join(cwd, "~other/Goldmine/note.md"));
+    assert.equal(d.exists, false);
+    assert.equal(d.blocked, true);
   });
 });
 

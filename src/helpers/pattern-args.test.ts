@@ -35,12 +35,15 @@ type ExecStub = (
 
 /**
  * Hand-built predicate ctx. `args` are walker words in `{ text }`
- * form (the shape `argText` reads).
+ * form (the shape `argText` reads). `env` seeds the walker's
+ * tracked env at the command ref (tilde expansion reads it first,
+ * falling back to `process.env` when absent).
  */
 function makeCtx(
   args: readonly { text: string }[],
   cwd: string,
   exec?: ExecStub,
+  env?: ReadonlyMap<string, string>,
 ): PredicateContext {
   const ctx = {
     cwd,
@@ -56,7 +59,7 @@ function makeCtx(
       })),
     appendEntry: () => {},
     findEntries: () => [],
-    walkerState: {},
+    walkerState: env !== undefined ? { cwd, env } : {},
   };
   return ctx as unknown as PredicateContext;
 }
@@ -274,6 +277,70 @@ describe("parseBodyFileArg", () => {
         kind: "substitution",
         path: "</abs/Goldmine/note.md",
         quoted: false,
+      },
+    );
+  });
+
+  it("marks a bare ~/ path unquoted (expands downstream)", () => {
+    assert.deepEqual(
+      parseBodyFileArg(`<(perl -0777 -pe '${BODY_STRIP}' ~/Goldmine/note.md)`),
+      {
+        kind: "substitution",
+        path: "~/Goldmine/note.md",
+        quoted: false,
+      },
+    );
+  });
+
+  it('marks a double-quoted "~/…" path quoted (never expands)', () => {
+    // Bash-exact: quotes suppress tilde expansion — the resolver
+    // keeps the literal path, which then fails the exists check.
+    assert.deepEqual(
+      parseBodyFileArg(
+        `<(perl -0777 -pe '${BODY_STRIP}' "~/Goldmine/note.md")`,
+      ),
+      {
+        kind: "substitution",
+        path: "~/Goldmine/note.md",
+        quoted: true,
+      },
+    );
+  });
+
+  it("marks a single-quoted '~/…' path quoted (never expands)", () => {
+    assert.deepEqual(
+      parseBodyFileArg(
+        `<(perl -0777 -pe '${BODY_STRIP}' '~/Goldmine/note.md')`,
+      ),
+      {
+        kind: "substitution",
+        path: "~/Goldmine/note.md",
+        quoted: true,
+      },
+    );
+  });
+
+  it("a quote AFTER the ~ still expands (the ~ itself is unquoted)", () => {
+    // Bash keys off whether the leading `~` is quoted: `~"/x"`
+    // expands, `"~"/x` does not.
+    assert.deepEqual(
+      parseBodyFileArg(
+        `<(perl -0777 -pe '${BODY_STRIP}' ~"/Goldmine/note.md")`,
+      ),
+      {
+        kind: "substitution",
+        path: "~/Goldmine/note.md",
+        quoted: false,
+      },
+    );
+    assert.deepEqual(
+      parseBodyFileArg(
+        `<(perl -0777 -pe '${BODY_STRIP}' "~"/Goldmine/note.md)`,
+      ),
+      {
+        kind: "substitution",
+        path: "~/Goldmine/note.md",
+        quoted: true,
       },
     );
   });
@@ -514,5 +581,104 @@ describe("resolveAgainstCwd", () => {
   it("returns null for a walker-unknown cwd (fail-closed)", () => {
     const ctx = makeCtx([], "unknown");
     assert.equal(resolveAgainstCwd(ctx, "notes/body.md"), null);
+  });
+
+  it("expands a leading ~/ against the tracked HOME", () => {
+    const ctx = makeCtx(
+      [],
+      "/work/repo",
+      undefined,
+      new Map([["HOME", "/home/u"]]),
+    );
+    assert.equal(
+      resolveAgainstCwd(ctx, "~/Goldmine/note.md"),
+      "/home/u/Goldmine/note.md",
+    );
+  });
+
+  it("a HOME= override in the tracked env wins over process.env", () => {
+    // The tracked env is authoritative: the override applies even
+    // when the process env carries a different HOME.
+    const saved = process.env.HOME;
+    process.env.HOME = "/process/home";
+    try {
+      const ctx = makeCtx(
+        [],
+        "/work/repo",
+        undefined,
+        new Map([["HOME", "/override/home"]]),
+      );
+      assert.equal(
+        resolveAgainstCwd(ctx, "~/Goldmine/note.md"),
+        "/override/home/Goldmine/note.md",
+      );
+    } finally {
+      process.env.HOME = saved;
+    }
+  });
+
+  it("falls back to process.env HOME when the walker env is absent", () => {
+    const saved = process.env.HOME;
+    process.env.HOME = "/process/home";
+    try {
+      const ctx = makeCtx([], "/work/repo");
+      assert.equal(
+        resolveAgainstCwd(ctx, "~/Goldmine/note.md"),
+        "/process/home/Goldmine/note.md",
+      );
+    } finally {
+      process.env.HOME = saved;
+    }
+  });
+
+  it("returns null for ~/… when HOME is unknown (fail-closed)", () => {
+    // Tracked env present but HOME-less: authoritative, no process
+    // fallback — the vault predicate renders the explicit trace.
+    const ctx = makeCtx([], "/work/repo", undefined, new Map());
+    assert.equal(resolveAgainstCwd(ctx, "~/Goldmine/note.md"), null);
+  });
+
+  it("still resolves non-tilde paths when HOME is unknown", () => {
+    // HOME only matters for a leading `~` — everything else is
+    // unaffected by a missing HOME.
+    const ctx = makeCtx([], "/work/repo", undefined, new Map());
+    assert.equal(
+      resolveAgainstCwd(ctx, "notes/body.md"),
+      "/work/repo/notes/body.md",
+    );
+    assert.equal(
+      resolveAgainstCwd(ctx, "/vault/prs/body.md"),
+      "/vault/prs/body.md",
+    );
+  });
+
+  it("leaves a quoted path literal (quotes suppress expansion)", () => {
+    // `"~/x"` never expands in the shell: the quotes are already
+    // stripped by the tokenizer, the flag remembers.
+    const ctx = makeCtx(
+      [],
+      "/work/repo",
+      undefined,
+      new Map([["HOME", "/home/u"]]),
+    );
+    assert.equal(
+      resolveAgainstCwd(ctx, "~/Goldmine/note.md", true),
+      "/work/repo/~/Goldmine/note.md",
+    );
+  });
+
+  it("passes ~user/… through unchanged (documented upstream limit)", () => {
+    // The core helper returns `~user/…` as-is — resolution treats
+    // it as a relative path, exactly as before this change.
+    const ctx = makeCtx(
+      [],
+      "/work/repo",
+      undefined,
+      new Map([["HOME", "/home/u"]]),
+    );
+    assert.equal(
+      resolveAgainstCwd(ctx, "~other/Goldmine/note.md"),
+      "/work/repo/~other/Goldmine/note.md",
+    );
   });
 });

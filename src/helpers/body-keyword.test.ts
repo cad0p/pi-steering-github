@@ -29,12 +29,15 @@ type ExecStub = (
  * file and stripping its frontmatter with the SAME pinned program
  * semantics (a JS mirror used only to keep these tests hermetic —
  * the real behavior is pinned by `body-strip.test.ts`, which
- * spawns actual perl).
+ * spawns actual perl). `env` seeds the walker's tracked env at the
+ * command ref (tilde expansion reads it first, falling back to
+ * `process.env` when absent).
  */
 function makeCtx(
   args: readonly { text: string }[],
   cwd: string,
   exec?: ExecStub,
+  env?: ReadonlyMap<string, string>,
 ): PredicateContext {
   const ctx = {
     cwd,
@@ -50,7 +53,7 @@ function makeCtx(
       })),
     appendEntry: () => {},
     findEntries: () => [],
-    walkerState: {},
+    walkerState: env !== undefined ? { cwd, env } : {},
   };
   return ctx as unknown as PredicateContext;
 }
@@ -127,6 +130,62 @@ describe("bodyHasClosingKeyword", () => {
 
   it("is false for a missing body (fail-closed)", async () => {
     const ctx = makeCtx([{ text: "--title" }, { text: "x" }], "/work/repo");
+    assert.equal(await bodyHasClosingKeyword(ctx), false);
+  });
+
+  it("hands perl the expanded path for a bare ~/… file", async () => {
+    // `ctx.exec` bypasses the shell, so the helper replicates the
+    // shell handoff: the pinned perl receives what bash would hand
+    // it. The stub asserts the file arg is the expanded path.
+    const seen: string[] = [];
+    const exec: ExecStub = async (cmd, args) => {
+      if (cmd === "perl") seen.push(args[3] ?? "");
+      return { stdout: "Closes #12\n", stderr: "", exitCode: 0 };
+    };
+    const ctx = makeCtx(
+      [
+        { text: "--body-file" },
+        { text: stripSubstitution("~/Goldmine/note.md") },
+      ],
+      "/work/repo",
+      exec,
+      new Map([["HOME", "/home/u"]]),
+    );
+    assert.equal(await bodyHasClosingKeyword(ctx), true);
+    assert.deepEqual(seen, ["/home/u/Goldmine/note.md"]);
+  });
+
+  it('hands perl the literal path for a quoted "~/…" file', async () => {
+    // Bash-exact: the quoted tilde stays literal — perl receives
+    // `~/…` verbatim (and would fail to open it, fail-closed).
+    const seen: string[] = [];
+    const exec: ExecStub = async (cmd, args) => {
+      if (cmd === "perl") seen.push(args[3] ?? "");
+      return { stdout: "Closes #12\n", stderr: "", exitCode: 0 };
+    };
+    const ctx = makeCtx(
+      [
+        { text: "--body-file" },
+        { text: stripSubstitution('"~/Goldmine/note.md"') },
+      ],
+      "/work/repo",
+      exec,
+      new Map([["HOME", "/home/u"]]),
+    );
+    assert.equal(await bodyHasClosingKeyword(ctx), true);
+    assert.deepEqual(seen, ["~/Goldmine/note.md"]);
+  });
+
+  it("is false for ~/… when HOME is unknown (fail-closed)", async () => {
+    const ctx = makeCtx(
+      [
+        { text: "--body-file" },
+        { text: stripSubstitution("~/Goldmine/note.md") },
+      ],
+      "/work/repo",
+      perlExec("Closes #12\n"),
+      new Map(),
+    );
     assert.equal(await bodyHasClosingKeyword(ctx), false);
   });
 });
