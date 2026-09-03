@@ -18,13 +18,17 @@
  */
 
 import { readFileSync } from "node:fs";
-import type { PredicateContext } from "@cad0p/pi-steering";
+import {
+  expandTildeIfLeading,
+  type PredicateContext,
+} from "@cad0p/pi-steering";
 import { BODY_STRIP } from "./body-strip.ts";
 import {
   findBodyFileValue,
   findFlagValue,
   parseBodyFileArg,
   resolveAgainstCwd,
+  tildeEnv,
 } from "./pattern-args.ts";
 import { ISSUE_REF } from "./patterns.ts";
 
@@ -38,12 +42,21 @@ export async function bodyHasClosingKeyword(
     if (parsed === null) return false; // unparsable value → fail-closed
     if (parsed.kind === "substitution") {
       // The pinned one-liner IS the definition of the canonical body.
+      // `ctx.exec` bypasses the shell, so replicate what the shell
+      // would hand perl: an unquoted leading `~` expands to HOME
+      // (tracked env at the command ref, process env fallback),
+      // a quoted one stays literal (bash-exact — perl then fails to
+      // open it, fail-closed). HOME unknown → fail-closed.
+      const expanded = parsed.quoted
+        ? parsed.path
+        : expandTildeIfLeading(parsed.path, tildeEnv(ctx));
+      if (expanded === undefined) return false;
       try {
         const res = await ctx.exec("perl", [
           "-0777",
           "-pe",
           BODY_STRIP,
-          parsed.path,
+          expanded,
         ]);
         if (res.exitCode !== 0) return false;
         return refRe.test(res.stdout ?? "");

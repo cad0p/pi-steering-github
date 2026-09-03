@@ -179,14 +179,14 @@ describe("parseBodyFileArg", () => {
   it("parses the pinned perl substitution", () => {
     assert.deepEqual(
       parseBodyFileArg(`<(perl -0777 -pe '${BODY_STRIP}' /vault/prs/note.md)`),
-      { kind: "substitution", path: "/vault/prs/note.md" },
+      { kind: "substitution", path: "/vault/prs/note.md", quoted: false },
     );
   });
 
   it("parses a double-quoted program (quote-agnostic pin)", () => {
     assert.deepEqual(
       parseBodyFileArg(`<(perl -0777 -pe "${BODY_STRIP}" /vault/prs/note.md)`),
-      { kind: "substitution", path: "/vault/prs/note.md" },
+      { kind: "substitution", path: "/vault/prs/note.md", quoted: false },
     );
   });
 
@@ -195,7 +195,7 @@ describe("parseBodyFileArg", () => {
       parseBodyFileArg(
         `<(perl -0777 -pe '${BODY_STRIP}' "/vault/a b/note.md")`,
       ),
-      { kind: "substitution", path: "/vault/a b/note.md" },
+      { kind: "substitution", path: "/vault/a b/note.md", quoted: true },
     );
   });
 
@@ -257,7 +257,11 @@ describe("parseBodyFileArg", () => {
       parseBodyFileArg(
         `<(perl -0777 -pe '${BODY_STRIP}' <../Goldmine/note.md)`,
       ),
-      { kind: "substitution", path: "<../Goldmine/note.md" },
+      {
+        kind: "substitution",
+        path: "<../Goldmine/note.md",
+        quoted: false,
+      },
     );
   });
 
@@ -266,7 +270,11 @@ describe("parseBodyFileArg", () => {
       parseBodyFileArg(
         `<(perl -0777 -pe '${BODY_STRIP}' </abs/Goldmine/note.md)`,
       ),
-      { kind: "substitution", path: "</abs/Goldmine/note.md" },
+      {
+        kind: "substitution",
+        path: "</abs/Goldmine/note.md",
+        quoted: false,
+      },
     );
   });
 });

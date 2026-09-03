@@ -125,7 +125,7 @@ export async function diagnose(
   }
   const cwd =
     typeof ctx.cwd === "string" && ctx.cwd !== "unknown" ? ctx.cwd : null;
-  const abs = resolveAgainstCwd(ctx, parsed.path);
+  const abs = resolveAgainstCwd(ctx, parsed.path, parsed.quoted);
   if (abs === null) {
     if (cwd !== null) {
       // Known cwd + null abs can only mean tilde expansion failed

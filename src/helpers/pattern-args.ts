@@ -117,7 +117,7 @@ export function findBodyFileValue(ctx: PredicateContext): string {
  *     disabled-rules combos).
  */
 export type BodyFileArg =
-  | { kind: "substitution"; path: string }
+  | { kind: "substitution"; path: string; quoted: boolean }
   | { kind: "direct"; path: string };
 
 // ---------------------------------------------------------------------------
@@ -159,15 +159,19 @@ export function parseBodyFileArg(word: string): BodyFileArg | null {
     if (tokens.length === STRIP_COMMAND_TOKENS.length + 1) {
       let pinned = true;
       for (let i = 0; i < STRIP_COMMAND_TOKENS.length; i++) {
-        if (tokens[i] !== STRIP_COMMAND_TOKENS[i]) {
+        if (tokens[i]?.value !== STRIP_COMMAND_TOKENS[i]) {
           pinned = false;
           break;
         }
       }
       if (pinned) {
         const path = tokens[STRIP_COMMAND_TOKENS.length];
-        if (path !== undefined && path !== "") {
-          return { kind: "substitution", path };
+        if (path !== undefined && path.value !== "") {
+          return {
+            kind: "substitution",
+            path: path.value,
+            quoted: path.quoted,
+          };
         }
       }
     }
@@ -183,7 +187,7 @@ export function parseBodyFileArg(word: string): BodyFileArg | null {
  * the byte offset; otherwise the two full command lines.
  */
 export function renderBodyFileDiff(v: string): string {
-  const tokens = tokenizeInner(v.slice(2, -1).trim());
+  const tokens = tokenizeInner(v.slice(2, -1).trim()).map((t) => t.value);
   const shape = tokens.length === STRIP_COMMAND_TOKENS.length + 1;
   const prefixPinned =
     shape && STRIP_COMMAND_TOKENS.slice(0, 3).every((t, i) => tokens[i] === t);
@@ -279,32 +283,68 @@ export function countSubstitutionTokens(word: string): number | null {
 }
 
 /**
+ * A shell word inside a `<( … )` word: the quote-stripped value
+ * plus whether the token BEGAN with a quote character.
+ *
+ * Stripping is correct for the program byte-pin (quoting style is
+ * free — `'PROG'` and `"PROG"` pin identically) but wrong for the
+ * path: bash suppresses tilde expansion when the leading `~` is
+ * quoted, so the path token must remember its quotedness for the
+ * resolver to stay shell-exact. `quoted` keys off the token's
+ * first VALUE character (a token whose first value character came
+ * from inside quotes has its leading `~` quoted: `"~"/x` does not
+ * expand while `~"/x"` — like `""~/x` — still does, bash-exact).
+ */
+interface InnerToken {
+  value: string;
+  quoted: boolean;
+}
+
+/**
  * Shell-style word splitting on the inner text of a `<( … )` word:
  * whitespace separates tokens outside quotes; `"` and `'` quotes are
  * stripped when a token is extracted (equivalent to shell word
  * splitting on the inner text). An unmatched quote just ends the
  * token — the strict token-count + byte-pin downstream fails closed.
  */
-function tokenizeInner(text: string): string[] {
-  const tokens: string[] = [];
+function tokenizeInner(text: string): InnerToken[] {
+  const tokens: InnerToken[] = [];
   let current = "";
+  let quoted = false;
+  let started = false;
   let quote: '"' | "'" | null = null;
+  const push = () => {
+    if (current !== "") {
+      tokens.push({ value: current, quoted });
+      current = "";
+      quoted = false;
+      started = false;
+    }
+  };
   for (const ch of text) {
     if (quote !== null) {
-      if (ch === quote) quote = null;
-      else current += ch;
+      if (ch === quote) {
+        quote = null;
+      } else {
+        // Empty quotes contribute no value character, so the flag
+        // keys off the first VALUE character, not the first quote:
+        // `""~/x` still expands (bash-exact).
+        if (!started) {
+          quoted = true;
+          started = true;
+        }
+        current += ch;
+      }
     } else if (ch === '"' || ch === "'") {
       quote = ch;
     } else if (/\s/.test(ch)) {
-      if (current !== "") {
-        tokens.push(current);
-        current = "";
-      }
+      push();
     } else {
       current += ch;
+      started = true;
     }
   }
-  if (current !== "") tokens.push(current);
+  push();
   return tokens;
 }
 
@@ -325,14 +365,20 @@ function tokenizeInner(text: string): string[] {
  *
  * `~user/…` passes through unchanged (documented upstream limit —
  * the core helper returns it as-is, no new behavior here).
+ *
+ * `quoted` is the path token's quotedness from `parseBodyFileArg`
+ * (bash suppresses tilde expansion inside quotes): a quoted path
+ * resolves literally — `"~/x"` joins onto the cwd and fails the
+ * exists check, which is both bash-exact and fail-closed.
  */
 export function resolveAgainstCwd(
   ctx: PredicateContext,
   path: string,
+  quoted = false,
 ): string | null {
   const cwd = ctx.cwd;
   if (typeof cwd !== "string" || cwd === "unknown") return null;
-  const expanded = expandTildeIfLeading(path, tildeEnv(ctx));
+  const expanded = quoted ? path : expandTildeIfLeading(path, tildeEnv(ctx));
   if (expanded === undefined) return null;
   return isAbsolute(expanded) ? expanded : resolve(cwd, expanded);
 }
@@ -341,8 +387,10 @@ export function resolveAgainstCwd(
  * The env for tilde expansion: the walker's tracked env at the
  * command ref when present (authoritative — includes `HOME=`
  * overrides), else the process env projected to a string map.
+ * Exported for the keyword helper, which replicates the same
+ * shell handoff for the pinned perl invocation.
  */
-function tildeEnv(ctx: PredicateContext): ReadonlyMap<string, string> {
+export function tildeEnv(ctx: PredicateContext): ReadonlyMap<string, string> {
   const tracked = ctx.walkerState?.env;
   if (tracked !== undefined) return tracked;
   const env = new Map<string, string>();
