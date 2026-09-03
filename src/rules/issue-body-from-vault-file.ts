@@ -19,26 +19,27 @@
  * Since #43 the `reason` is a dynamic `ReasonFn` (same shared
  * diagnostic as `pr-body-from-vault-file` — both rules consume the
  * SAME `explainBodyFileArg` tag + `renderBodyFileDiff` helper, so
- * the byte-diff format can never drift between them).
+ * the byte-diff format can never drift between them). Since #50
+ * every other blocked stage renders mirror + trace + slotted recipe
+ * from the shared `diagnose()` struct (same struct as the verdict).
  */
 
 import type { Rule } from "@cad0p/pi-steering";
-import { BODY_STRIP } from "../helpers/body-strip.ts";
+import {
+  renderDegradedReason,
+  renderDiagnosedReason,
+  renderStaticRecipe,
+} from "../helpers/body-file-reason.ts";
 import {
   explainBodyFileArg,
   findBodyFileValue,
   renderBodyFileDiff,
 } from "../helpers/pattern-args.ts";
 import { ISSUE_BODY_ANCHOR } from "../helpers/patterns.ts";
+import { diagnose } from "../predicates/missing-vault-body-file.ts";
 
 /** The canonical static recipe (byte-identity pinned in `index.test.ts`). */
-const STATIC =
-  `Issue bodies must come from a body file in the napkin vault:\n` +
-  `  gh issue create --title "..." --body-file ` +
-  `<(perl -0777 -pe '${BODY_STRIP}' ` +
-  `<vault>/**/<repo>/issues/YYYY-MM-DD-issue<N>-<slug>.md)\n` +
-  `- If foreign issue: cd to the repo you want to file the issue; ` +
-  `REQUIREMENT: have a foreign subagent maintainer loop before filing`;
+const STATIC = renderStaticRecipe("issues");
 
 export const issueBodyFromVaultFile = {
   name: "issue-body-from-vault-file",
@@ -46,10 +47,19 @@ export const issueBodyFromVaultFile = {
   field: "command",
   pattern: ISSUE_BODY_ANCHOR,
   when: { missingVaultBodyFile: { section: "issues" } },
-  reason: (ctx) => {
+  reason: async (ctx) => {
     const v = findBodyFileValue(ctx);
-    return explainBodyFileArg(v) === "diff"
-      ? `${renderBodyFileDiff(v)}\n\n${STATIC}`
-      : STATIC;
+    if (explainBodyFileArg(v) === "diff") {
+      return `${renderBodyFileDiff(v)}\n\n${STATIC}`;
+    }
+    // Same struct the predicate verdict came from — mirror + trace +
+    // slotted recipe (#50). A throwing reason is replaced wholesale
+    // by the evaluator's fail-safe fallback, so the diagnose call is
+    // wrapped with a degraded mirror+recipe fallback that never throws.
+    try {
+      return renderDiagnosedReason(await diagnose(ctx, "issues"), "issues");
+    } catch {
+      return renderDegradedReason(v, "issues");
+    }
   },
 } as const satisfies Rule;
