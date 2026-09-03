@@ -244,7 +244,10 @@ describe("github plugin — gh-repo-flag-before-subcommand composed gate (engine
     }
     const raw = result.reason ?? "";
     const reason = typeof raw === "string" ? raw : String(raw);
-    const match = reason.match(/^\[steering:([^@\]]+)(?:@[^\]]+)?\]/);
+    // Same preamble-tolerant anchor as integration.test.ts: the tag
+    // is line 1 pre-preamble, line 2 after the block-reason preamble
+    // landed (pi-steering issue #85).
+    const match = reason.match(/(?:^|\n)\[steering:([^@\]]+)(?:@[^\]]+)?\]/);
     return { block: true, rule: match ? match[1] : null };
   }
 
