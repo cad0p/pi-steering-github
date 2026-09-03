@@ -25,25 +25,28 @@
  * whose inner command deviates from the pinned one-liner now carries
  * a byte-exact diagnostic (the divergent core spans with the byte
  * offset, or the two full command lines) before the canonical static
- * recipe — the predicate and this reason consume the SAME
- * `explainBodyFileArg` tag, so verdict and message never drift.
+ * recipe. Since #50 every other blocked stage renders mirror + trace
+ * + slotted recipe from the shared `diagnose()` struct — the
+ * predicate and this reason consume the SAME struct, so verdict and
+ * message never drift.
  */
 
 import type { Rule } from "@cad0p/pi-steering";
-import { BODY_STRIP } from "../helpers/body-strip.ts";
+import {
+  renderDegradedReason,
+  renderDiagnosedReason,
+  renderStaticRecipe,
+} from "../helpers/body-file-reason.ts";
 import {
   explainBodyFileArg,
   findBodyFileValue,
   renderBodyFileDiff,
 } from "../helpers/pattern-args.ts";
 import { PR_BODY_ANCHOR } from "../helpers/patterns.ts";
+import { diagnose } from "../predicates/missing-vault-body-file.ts";
 
 /** The canonical static recipe (byte-identity pinned in `index.test.ts`). */
-const STATIC =
-  `PR bodies must come from a body file in the napkin vault:\n` +
-  `  gh pr create --title "..." --body-file ` +
-  `<(perl -0777 -pe '${BODY_STRIP}' ` +
-  `<vault>/**/<repo>/prs/YYYY-MM-DD-pr<N>-<slug>.md)\n`;
+const STATIC = renderStaticRecipe("prs");
 
 export const prBodyFromVaultFile = {
   name: "pr-body-from-vault-file",
@@ -51,10 +54,19 @@ export const prBodyFromVaultFile = {
   field: "command",
   pattern: PR_BODY_ANCHOR,
   when: { missingVaultBodyFile: { section: "prs" } },
-  reason: (ctx) => {
+  reason: async (ctx) => {
     const v = findBodyFileValue(ctx);
-    return explainBodyFileArg(v) === "diff"
-      ? `${renderBodyFileDiff(v)}\n\n${STATIC}`
-      : STATIC;
+    if (explainBodyFileArg(v) === "diff") {
+      return `${renderBodyFileDiff(v)}\n\n${STATIC}`;
+    }
+    // Same struct the predicate verdict came from — mirror + trace +
+    // slotted recipe (#50). A throwing reason is replaced wholesale
+    // by the evaluator's fail-safe fallback, so the diagnose call is
+    // wrapped with a degraded mirror+recipe fallback that never throws.
+    try {
+      return renderDiagnosedReason(await diagnose(ctx, "prs"), "prs");
+    } catch {
+      return renderDegradedReason(v, "prs");
+    }
   },
 } as const satisfies Rule;

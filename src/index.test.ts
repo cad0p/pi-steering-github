@@ -50,12 +50,12 @@ describe("github plugin — reason strings (byte-identity pins)", () => {
   // it on the missing stage (empty args), which returns the static
   // recipe byte-for-byte; the dynamic diagnostic stages are pinned
   // by pattern-args.test.ts + integration.test.ts.
-  it("pr-body-from-vault-file reason (dynamic — missing stage returns the static recipe byte-for-byte)", () => {
-    // reason is now a ReasonFn (dynamic byte-diff diagnostic, #43).
-    // Invoked with a minimal empty-args ctx: findBodyFileValue → ""
-    // → missing stage → the static recipe, byte-for-byte, no throw
+  it("pr-body-from-vault-file reason (dynamic — missing stage returns the static recipe byte-for-byte)", async () => {
+    // reason is now an async ReasonFn (dynamic mirror+trace diagnostic,
+    // #50). Invoked with a minimal empty-args ctx: findBodyFileValue →
+    // "" → missing stage → the static recipe, byte-for-byte, no throw
     // (the chain is fs/exec-free on the static path).
-    const reason = prBodyFromVaultFile.reason({
+    const reason = await prBodyFromVaultFile.reason({
       input: { args: [] },
     } as unknown as PredicateContext);
     assert.equal(
@@ -63,7 +63,7 @@ describe("github plugin — reason strings (byte-identity pins)", () => {
       "PR bodies must come from a body file in the napkin vault:\n" +
         '  gh pr create --title "..." --body-file ' +
         `<(perl -0777 -pe '${BODY_STRIP}' ` +
-        "<vault>/**/<repo>/prs/YYYY-MM-DD-pr<N>-<slug>.md)\n",
+        "VAULT/**/REPO/prs/YYYY-MM-DD-pr<N>-<slug>.md)",
     );
   });
 
@@ -90,9 +90,9 @@ describe("github plugin — reason strings (byte-identity pins)", () => {
     );
   });
 
-  it("issue-body-from-vault-file reason (dynamic — missing stage returns the static recipe byte-for-byte)", () => {
-    // Same ReasonFn invocation pin as the PR twin (missing stage).
-    const reason = issueBodyFromVaultFile.reason({
+  it("issue-body-from-vault-file reason (dynamic — missing stage returns the static recipe byte-for-byte)", async () => {
+    // Same async-ReasonFn invocation pin as the PR twin (missing stage).
+    const reason = await issueBodyFromVaultFile.reason({
       input: { args: [] },
     } as unknown as PredicateContext);
     assert.equal(
@@ -100,7 +100,7 @@ describe("github plugin — reason strings (byte-identity pins)", () => {
       "Issue bodies must come from a body file in the napkin vault:\n" +
         '  gh issue create --title "..." --body-file ' +
         `<(perl -0777 -pe '${BODY_STRIP}' ` +
-        "<vault>/**/<repo>/issues/YYYY-MM-DD-issue<N>-<slug>.md)\n" +
+        "VAULT/**/REPO/issues/YYYY-MM-DD-issue<N>-<slug>.md)\n" +
         "- If foreign issue: cd to the repo you want to file the issue; " +
         "REQUIREMENT: have a foreign subagent maintainer loop before filing",
     );

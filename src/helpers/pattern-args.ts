@@ -197,7 +197,7 @@ export function renderBodyFileDiff(v: string): string {
   }
   return [
     "substitution inner command deviates from the pinned strip:",
-    `  - expected: perl -0777 -pe '${BODY_STRIP}' <path>`,
+    `  - expected: perl -0777 -pe '${BODY_STRIP}' PATH`,
     `  + got:      ${tokens.map(quoteForDisplay).join(" ")}`,
   ].join("\n");
 }
@@ -253,6 +253,27 @@ const STRIP_COMMAND_TOKENS: readonly string[] = [
   "-pe",
   BODY_STRIP,
 ] as const;
+
+/**
+ * The expected token count inside a well-formed `<( … )` word: the
+ * pinned strip-command tokens plus the single path token.
+ */
+export const EXPECTED_SUBSTITUTION_TOKENS: number =
+  STRIP_COMMAND_TOKENS.length + 1;
+
+/**
+ * Count the shell words inside a `<( … )` word (quotes respected).
+ * `null` when the word is not a `<(`-prefixed word at all. An
+ * unclosed `<(` word still counts (the trailing `)` is optional) —
+ * the `form`-stage mirror uses this for its structure line.
+ */
+export function countSubstitutionTokens(word: string): number | null {
+  if (!word.startsWith("<(")) return null;
+  const inner = word.endsWith(")")
+    ? word.slice(2, -1).trim()
+    : word.slice(2).trim();
+  return tokenizeInner(inner).length;
+}
 
 /**
  * Shell-style word splitting on the inner text of a `<( … )` word:

@@ -17,7 +17,7 @@ import { dirname, join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import type { PredicateContext } from "@cad0p/pi-steering";
 import { BODY_STRIP } from "../helpers/pattern-args.ts";
-import { missingVaultBodyFile } from "./missing-vault-body-file.ts";
+import { diagnose, missingVaultBodyFile } from "./missing-vault-body-file.ts";
 
 // ---------------------------------------------------------------------------
 // Test scaffolding: hand-built ctx
@@ -240,5 +240,147 @@ describe("missingVaultBodyFile", () => {
   it("fires for a bare --body-file with no value (fail-closed)", async () => {
     const ctx = makeCtx([{ text: "--body-file" }], "/work/repo");
     assert.equal(await missingVaultBodyFile({ section: "prs" }, ctx), true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// diagnose — the shared struct (verdict + message source, #50)
+// ---------------------------------------------------------------------------
+
+describe("diagnose", () => {
+  it("predicate verdict IS diagnose().blocked (no-drift pin)", async () => {
+    const fx = makeVaultRepoFixture("fixture-repo");
+    const cmds: { text: string }[][] = [
+      [{ text: "--title" }, { text: "x" }],
+      [{ text: "--body-file" }, { text: "/vault/prs/note.md" }],
+      [{ text: "--body-file" }, { text: "<(cat /vault/note.md)" }],
+      [
+        { text: "--body-file" },
+        { text: stripSubstitution(`"${fx.prBodyFile}"`) },
+      ],
+    ];
+    for (const args of cmds) {
+      for (const section of ["prs", "issues"] as const) {
+        const ctx = makeCtx(
+          args,
+          fx.vault,
+          gitRemoteExec("https://github.com/cad0p/fixture-repo.git"),
+        );
+        assert.equal(
+          await missingVaultBodyFile({ section }, ctx),
+          (await diagnose(ctx, section)).blocked,
+        );
+      }
+    }
+  });
+
+  it("missing stage: empty received, everything else null, blocked", async () => {
+    const ctx = makeCtx(
+      [{ text: "pr" }, { text: "create" }, { text: "--title" }, { text: "x" }],
+      "/work/repo",
+    );
+    assert.deepEqual(await diagnose(ctx, "prs"), {
+      tag: "missing",
+      received: "",
+      path: null,
+      cwd: null,
+      abs: null,
+      exists: null,
+      vaultRoot: null,
+      repo: null,
+      blocked: true,
+    });
+  });
+
+  it("direct stage: path mirrored, trace fields null, blocked", async () => {
+    const ctx = makeCtx(
+      [{ text: "--body-file" }, { text: "/vault/prs/note.md" }],
+      "/work/repo",
+    );
+    const d = await diagnose(ctx, "prs");
+    assert.equal(d.tag, "direct");
+    assert.equal(d.received, "/vault/prs/note.md");
+    assert.equal(d.path, "/vault/prs/note.md");
+    assert.equal(d.blocked, true);
+  });
+
+  it("`<`-prefixed path: tag ok, opaque path kept, exists false (#48/#49)", async () => {
+    const cwd = makeFixtureDir();
+    const ctx = makeCtx(
+      [
+        { text: "--body-file" },
+        {
+          text: `<(perl -0777 -pe '${BODY_STRIP}' <../Goldmine/personal/github/pcad.it-infra/issues/2026-09-01-issue188-test.md)`,
+        },
+      ],
+      cwd,
+    );
+    const d = await diagnose(ctx, "issues");
+    assert.equal(d.tag, "ok");
+    assert.equal(
+      d.path,
+      "<../Goldmine/personal/github/pcad.it-infra/issues/2026-09-01-issue188-test.md",
+    );
+    assert.equal(d.cwd, cwd);
+    assert.ok(
+      d.abs !== null &&
+        d.abs.endsWith(
+          "<../Goldmine/personal/github/pcad.it-infra/issues/2026-09-01-issue188-test.md",
+        ),
+    );
+    assert.equal(d.exists, false);
+    assert.equal(d.vaultRoot, null);
+    assert.equal(d.repo, null);
+    assert.equal(d.blocked, true);
+  });
+
+  it("valid substitution: every field filled, not blocked", async () => {
+    const fx = makeVaultRepoFixture("fixture-repo");
+    const ctx = makeCtx(
+      [
+        { text: "--body-file" },
+        { text: stripSubstitution(`"${fx.prBodyFile}"`) },
+      ],
+      fx.vault,
+      gitRemoteExec("https://github.com/cad0p/fixture-repo.git"),
+    );
+    const d = await diagnose(ctx, "prs");
+    assert.equal(d.tag, "ok");
+    assert.equal(d.received, stripSubstitution(`"${fx.prBodyFile}"`));
+    assert.equal(d.path, fx.prBodyFile);
+    assert.equal(d.cwd, fx.vault);
+    assert.equal(d.abs, fx.prBodyFile);
+    assert.equal(d.exists, true);
+    assert.equal(d.vaultRoot, fx.vault);
+    assert.equal(d.repo, "fixture-repo");
+    assert.equal(d.blocked, false);
+  });
+
+  it("walker-unknown cwd: cwd/abs null, blocked", async () => {
+    const fx = makeVaultRepoFixture("fixture-repo");
+    const ctx = makeCtx(
+      [
+        { text: "--body-file" },
+        { text: stripSubstitution(`"${fx.prBodyFile}"`) },
+      ],
+      "unknown",
+      gitRemoteExec("https://github.com/cad0p/fixture-repo.git"),
+    );
+    const d = await diagnose(ctx, "prs");
+    assert.equal(d.tag, "ok");
+    assert.equal(d.cwd, null);
+    assert.equal(d.abs, null);
+    assert.equal(d.blocked, true);
+  });
+
+  it("pathless shape: tag diff, no path, blocked (generic token-count fallback renders it)", async () => {
+    const ctx = makeCtx(
+      [{ text: "--body-file" }, { text: `<(perl -0777 -pe '${BODY_STRIP}')` }],
+      "/work/repo",
+    );
+    const d = await diagnose(ctx, "prs");
+    assert.equal(d.tag, "diff");
+    assert.equal(d.path, null);
+    assert.equal(d.blocked, true);
   });
 });

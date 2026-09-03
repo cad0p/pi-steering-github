@@ -165,12 +165,22 @@ export const githubPlugin = {
 
 export default githubPlugin;
 
+export {
+  renderDegradedReason,
+  renderDiagnosedReason,
+  renderSlottedRecipe,
+  renderStaticRecipe,
+} from "./helpers/body-file-reason.ts";
 export { bodyHasClosingKeyword } from "./helpers/body-keyword.ts";
 export {
   argText,
+  countSubstitutionTokens,
+  EXPECTED_SUBSTITUTION_TOKENS,
+  explainBodyFileArg,
   findBodyFileValue,
   findFlagValue,
   parseBodyFileArg,
+  renderBodyFileDiff,
   resolveAgainstCwd,
   unquote,
 } from "./helpers/pattern-args.ts";
@@ -197,8 +207,13 @@ export {
 } from "./helpers/patterns.ts";
 export type { ForeignRepoTargetArgs } from "./predicates/foreign-repo-target.ts";
 export { foreignRepoTarget } from "./predicates/foreign-repo-target.ts";
+export type {
+  BodyFileDiagnosis,
+  BodyFileSection,
+} from "./predicates/missing-vault-body-file.ts";
 export {
   BODY_STRIP,
+  diagnose,
   missingVaultBodyFile,
 } from "./predicates/missing-vault-body-file.ts";
 export { ghRepoCreateNeedsSeed } from "./rules/gh-repo-create-needs-seed.ts";
