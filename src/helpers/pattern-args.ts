@@ -21,7 +21,10 @@
  */
 
 import { isAbsolute, resolve } from "node:path";
-import type { PredicateContext } from "@cad0p/pi-steering";
+import {
+  expandTildeIfLeading,
+  type PredicateContext,
+} from "@cad0p/pi-steering";
 import { BODY_STRIP } from "./body-strip.ts";
 
 export { BODY_STRIP };
@@ -309,6 +312,19 @@ function tokenizeInner(text: string): string[] {
  * Resolve a possibly-relative path against the command's effective
  * cwd. `null` when the cwd is the walker's `"unknown"` sentinel
  * (fail-closed — the caller treats it as missing).
+ *
+ * A leading `~` expands to `$HOME` first (shell-exact: bash expands
+ * an unquoted leading tilde before the inner command ever sees the
+ * word, so without this a bare `~/…` vault path would join onto the
+ * cwd and over-block). The env is the walker's tracked env at the
+ * command ref when present (it carries `HOME=` overrides), else
+ * `process.env`. Expansion returning `undefined` (HOME unknown)
+ * ALSO yields `null` — fail-closed; `diagnose` renders that arm
+ * with its own explicit trace line (known cwd + null abs can only
+ * mean the expansion failed).
+ *
+ * `~user/…` passes through unchanged (documented upstream limit —
+ * the core helper returns it as-is, no new behavior here).
  */
 export function resolveAgainstCwd(
   ctx: PredicateContext,
@@ -316,5 +332,22 @@ export function resolveAgainstCwd(
 ): string | null {
   const cwd = ctx.cwd;
   if (typeof cwd !== "string" || cwd === "unknown") return null;
-  return isAbsolute(path) ? path : resolve(cwd, path);
+  const expanded = expandTildeIfLeading(path, tildeEnv(ctx));
+  if (expanded === undefined) return null;
+  return isAbsolute(expanded) ? expanded : resolve(cwd, expanded);
+}
+
+/**
+ * The env for tilde expansion: the walker's tracked env at the
+ * command ref when present (authoritative — includes `HOME=`
+ * overrides), else the process env projected to a string map.
+ */
+function tildeEnv(ctx: PredicateContext): ReadonlyMap<string, string> {
+  const tracked = ctx.walkerState?.env;
+  if (tracked !== undefined) return tracked;
+  const env = new Map<string, string>();
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value !== undefined) env.set(key, value);
+  }
+  return env;
 }
