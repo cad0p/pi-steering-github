@@ -44,12 +44,10 @@ import { dirname, relative, sep } from "node:path";
 import { isNapkinVaultDir } from "@cad0p/pi-napkin/steering";
 import type { PredicateContext, PredicateHandler } from "@cad0p/pi-steering";
 import {
-  argText,
   explainBodyFileArg,
   findBodyFileValue,
   parseBodyFileArg,
   resolveAgainstCwd,
-  unquote,
 } from "../helpers/pattern-args.ts";
 import { repoName } from "../helpers/repo-name.ts";
 
@@ -79,8 +77,6 @@ export type BodyFileSection = "prs" | "issues";
  *     is missing or outside any vault.
  *   - `repo` — the COMMAND repo (origin basename, cwd-folder
  *     fallback), `null` when undeterminable.
- *   - `stray` — a stray `<…` token adjacent to `--body-file` (the
- *     split-out redirect on pathless walker shapes), if any.
  *   - `blocked` — the verdict.
  */
 export interface BodyFileDiagnosis {
@@ -92,7 +88,6 @@ export interface BodyFileDiagnosis {
   exists: boolean | null;
   vaultRoot: string | null;
   repo: string | null;
-  stray: string | null;
   blocked: boolean;
 }
 
@@ -111,7 +106,6 @@ export async function diagnose(
 ): Promise<BodyFileDiagnosis> {
   const received = findBodyFileValue(ctx);
   const tag = explainBodyFileArg(received);
-  const stray = findStrayRedirectToken(ctx);
   const base = {
     tag,
     received,
@@ -121,7 +115,6 @@ export async function diagnose(
     exists: null as boolean | null,
     vaultRoot: null as string | null,
     repo: null as string | null,
-    stray,
   };
   if (received === "") return { ...base, blocked: true };
   const parsed = parseBodyFileArg(received);
@@ -192,45 +185,6 @@ export async function diagnose(
     repo,
     blocked,
   };
-}
-
-/**
- * Scan the argv words adjacent to the first `--body-file` / `-F`
- * occurrence for a stray `<…` token (not a `<(` substitution): on
- * pathless walker shapes the inner redirect (`</path` / `<../…`)
- * arrives as its own word next to the flag, and the value word
- * itself carries no path — without this scan the `<` would stay
- * invisible. Best-effort per walker version: the current walker
- * keeps the substitution's full inner text in one word, so the scan
- * is a no-op there (`null`).
- */
-function findStrayRedirectToken(ctx: PredicateContext): string | null {
-  const words = argText(ctx);
-  for (let i = 0; i < words.length; i++) {
-    const t = words[i]?.text ?? "";
-    let valueIndex: number | null = null;
-    if (
-      t === "--body-file" ||
-      t === "-F" ||
-      t === "--body-file=" ||
-      t === "-F="
-    ) {
-      valueIndex = i + 1;
-    } else if (t.startsWith("--body-file=") || t.startsWith("-F=")) {
-      valueIndex = i;
-    } else {
-      continue;
-    }
-    const lo = Math.max(0, i - 1);
-    const hi = Math.min(words.length - 1, valueIndex + 1);
-    for (let j = lo; j <= hi; j++) {
-      if (j === i || j === valueIndex) continue;
-      const w = unquote(words[j]?.text ?? "");
-      if (w.startsWith("<") && !w.startsWith("<(")) return w;
-    }
-    return null;
-  }
-  return null;
 }
 
 /**

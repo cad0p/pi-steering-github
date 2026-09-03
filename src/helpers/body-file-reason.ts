@@ -13,9 +13,8 @@
  *   - MIRROR — the path-side only (the program keeps its #43 diff):
  *     a parsed path token is mirrored verbatim (so a `<`-prefixed
  *     typo like #48/#49 shows its `<`); a present-but-unparsable
- *     value is mirrored as the value word plus the token-count
- *     structure line (plus the adjacent stray-redirect token when
- *     the walker split it out); an absent value has nothing to
+ *     value is mirrored as the value word plus the generic
+ *     token-count structure line; an absent value has nothing to
  *     mirror (recipe only, as before); a direct path is mirrored
  *     verbatim plus the one-line verbatim-upload note.
  *   - TRACE — uniform walk received, resolved, exists, vault, then
@@ -107,12 +106,8 @@ export function renderDiagnosedReason(
     case "form":
     case "diff": {
       // Present but unparsable — mirror the value word plus the
-      // token-count structure line (and the adjacent stray redirect
-      // when the walker split it out of the value word).
+      // generic token-count structure line.
       const lines = [renderValueMirror(d)];
-      if (d.stray !== null) {
-        lines.push(`stray redirect token adjacent to --body-file: ${d.stray}`);
-      }
       lines.push("", recipe);
       return lines.join(NEWLINE);
     }

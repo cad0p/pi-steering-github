@@ -31,7 +31,6 @@ function base(over: Partial<BodyFileDiagnosis>): BodyFileDiagnosis {
     exists: null,
     vaultRoot: null,
     repo: null,
-    stray: null,
     blocked: true,
     ...over,
   };
@@ -210,20 +209,29 @@ describe("renderDiagnosedReason", () => {
       ),
       `reason: ${reason}`,
     );
-    assert.ok(!reason.includes("stray redirect"), `reason: ${reason}`);
   });
 
-  it("form arm with a stray: mirrors the split-out redirect too", () => {
+  it("form arm with an unclosed substitution: counts the partial word", () => {
+    const received = `<(perl -0777 -pe '${BODY_STRIP}'`;
+    const d = base({ tag: "form", received });
+    const reason = renderDiagnosedReason(d, "issues");
+    assert.ok(
+      reason.includes(
+        `value as received: ${received} — 4 tokens inside <(…), expected 5 (perl -0777 -pe PROGRAM PATH)`,
+      ),
+      `reason: ${reason}`,
+    );
+  });
+
+  it("diff tag reaching the renderer falls back to value + token count", () => {
+    // The rules route `diff` to the #43 byte-diff diagnostic, so this
+    // arm is defensive — pinned here to document the generic fallback.
     const received = `<(perl -0777 -pe '${BODY_STRIP}')`;
-    const d = base({
-      tag: "form",
-      received,
-      stray: "</abs/Goldmine/note.md",
-    });
+    const d = base({ tag: "diff", received });
     const reason = renderDiagnosedReason(d, "prs");
     assert.ok(
       reason.includes(
-        "stray redirect token adjacent to --body-file: </abs/Goldmine/note.md",
+        `value as received: ${received} — 4 tokens inside <(…), expected 5 (perl -0777 -pe PROGRAM PATH)`,
       ),
       `reason: ${reason}`,
     );

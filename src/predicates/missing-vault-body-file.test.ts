@@ -288,7 +288,6 @@ describe("diagnose", () => {
       exists: null,
       vaultRoot: null,
       repo: null,
-      stray: null,
       blocked: true,
     });
   });
@@ -354,7 +353,6 @@ describe("diagnose", () => {
     assert.equal(d.exists, true);
     assert.equal(d.vaultRoot, fx.vault);
     assert.equal(d.repo, "fixture-repo");
-    assert.equal(d.stray, null);
     assert.equal(d.blocked, false);
   });
 
@@ -375,33 +373,14 @@ describe("diagnose", () => {
     assert.equal(d.blocked, true);
   });
 
-  it("stray scan: adjacent `<…` token is captured (pathless walker shape)", async () => {
+  it("pathless shape: tag diff, no path, blocked (generic token-count fallback renders it)", async () => {
     const ctx = makeCtx(
-      [
-        { text: "--body-file" },
-        { text: `<(perl -0777 -pe '${BODY_STRIP}')` },
-        { text: "</abs/Goldmine/note.md" },
-      ],
+      [{ text: "--body-file" }, { text: `<(perl -0777 -pe '${BODY_STRIP}')` }],
       "/work/repo",
     );
     const d = await diagnose(ctx, "prs");
     assert.equal(d.tag, "diff");
     assert.equal(d.path, null);
-    assert.equal(d.stray, "</abs/Goldmine/note.md");
     assert.equal(d.blocked, true);
-  });
-
-  it("stray scan: no-op when the substitution keeps its full text", async () => {
-    const fx = makeVaultRepoFixture("fixture-repo");
-    const ctx = makeCtx(
-      [
-        { text: "--body-file" },
-        { text: stripSubstitution(`"${fx.prBodyFile}"`) },
-      ],
-      fx.vault,
-      gitRemoteExec("https://github.com/cad0p/fixture-repo.git"),
-    );
-    const d = await diagnose(ctx, "prs");
-    assert.equal(d.stray, null);
   });
 });
