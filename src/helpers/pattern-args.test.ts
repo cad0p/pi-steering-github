@@ -12,6 +12,8 @@ import { describe, it } from "node:test";
 import type { PredicateContext } from "@cad0p/pi-steering";
 import { BODY_STRIP } from "./body-strip.ts";
 import {
+  countSubstitutionTokens,
+  EXPECTED_SUBSTITUTION_TOKENS,
   explainBodyFileArg,
   findBodyFileValue,
   findFlagValue,
@@ -246,6 +248,27 @@ describe("parseBodyFileArg", () => {
       path: "/vault/prs/note.md",
     });
   });
+
+  it("keeps a `<`-prefixed path as the opaque path token (#48/#49)", () => {
+    // The input-redirection typo: `<../…` inside the substitution is
+    // just the fifth token — the form parses (`ok`), the vault check
+    // fails it, and the #50 mirror shows the `<` verbatim.
+    assert.deepEqual(
+      parseBodyFileArg(
+        `<(perl -0777 -pe '${BODY_STRIP}' <../Goldmine/note.md)`,
+      ),
+      { kind: "substitution", path: "<../Goldmine/note.md" },
+    );
+  });
+
+  it("keeps an absolute `<`-prefixed path as the opaque path token (#49)", () => {
+    assert.deepEqual(
+      parseBodyFileArg(
+        `<(perl -0777 -pe '${BODY_STRIP}' </abs/Goldmine/note.md)`,
+      ),
+      { kind: "substitution", path: "</abs/Goldmine/note.md" },
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -290,6 +313,15 @@ describe("explainBodyFileArg", () => {
 
   it("cat substitution (2 tokens) → diff", () => {
     assert.equal(explainBodyFileArg("<(cat /vault/prs/note.md)"), "diff");
+  });
+
+  it("`<`-prefixed path still classifies `ok` (vault check fails it, #48/#49)", () => {
+    assert.equal(
+      explainBodyFileArg(
+        `<(perl -0777 -pe '${BODY_STRIP}' <../Goldmine/note.md)`,
+      ),
+      "ok",
+    );
   });
 
   it("sed with the pinned program → diff (never ok — tool pin)", () => {
@@ -351,11 +383,11 @@ describe("renderBodyFileDiff", () => {
     );
   });
 
-  it("cat → the two full lines", () => {
+  it("cat → the two full lines (PATH placeholder has no angle brackets, #50)", () => {
     assert.equal(
       renderBodyFileDiff("<(cat /vault/prs/note.md)"),
       "substitution inner command deviates from the pinned strip:\n" +
-        `  - expected: perl -0777 -pe '${BODY_STRIP}' <path>\n` +
+        `  - expected: perl -0777 -pe '${BODY_STRIP}' PATH\n` +
         "  + got:      cat /vault/prs/note.md",
     );
   });
@@ -367,7 +399,7 @@ describe("renderBodyFileDiff", () => {
     assert.equal(
       renderBodyFileDiff(`<(perl -0777 -pe '${farApart2}' /vault/prs/note.md)`),
       "substitution inner command deviates from the pinned strip:\n" +
-        `  - expected: perl -0777 -pe '${BODY_STRIP}' <path>\n` +
+        `  - expected: perl -0777 -pe '${BODY_STRIP}' PATH\n` +
         `  + got:      perl -0777 -pe '${farApart2}' /vault/prs/note.md`,
     );
   });
@@ -379,7 +411,7 @@ describe("renderBodyFileDiff", () => {
     assert.equal(
       renderBodyFileDiff(`<(sed -0777 -pe '${BODY_STRIP}' /vault/prs/note.md)`),
       "substitution inner command deviates from the pinned strip:\n" +
-        `  - expected: perl -0777 -pe '${BODY_STRIP}' <path>\n` +
+        `  - expected: perl -0777 -pe '${BODY_STRIP}' PATH\n` +
         `  + got:      sed -0777 -pe '${BODY_STRIP}' /vault/prs/note.md`,
     );
   });
@@ -409,9 +441,44 @@ describe("renderBodyFileDiff", () => {
         `<(perl -0777 -pe '${gotProgram}' /vault/prs/note.md)`,
       ),
       "substitution inner command deviates from the pinned strip:\n" +
-        `  - expected: perl -0777 -pe '${BODY_STRIP}' <path>\n` +
+        `  - expected: perl -0777 -pe '${BODY_STRIP}' PATH\n` +
         `  + got:      perl -0777 -pe '${gotProgram}' /vault/prs/note.md`,
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// countSubstitutionTokens
+// ---------------------------------------------------------------------------
+
+describe("countSubstitutionTokens", () => {
+  it("counts 5 for the pinned substitution", () => {
+    assert.equal(EXPECTED_SUBSTITUTION_TOKENS, 5);
+    assert.equal(
+      countSubstitutionTokens(
+        `<(perl -0777 -pe '${BODY_STRIP}' /vault/prs/note.md)`,
+      ),
+      5,
+    );
+  });
+
+  it("counts 4 for the pathless shape (swallowed redirect)", () => {
+    assert.equal(
+      countSubstitutionTokens(`<(perl -0777 -pe '${BODY_STRIP}')`),
+      4,
+    );
+  });
+
+  it("counts the unclosed `<(` word too (form stage)", () => {
+    assert.equal(
+      countSubstitutionTokens(`<(perl -0777 -pe '${BODY_STRIP}'`),
+      4,
+    );
+  });
+
+  it("returns null for a non-substitution word", () => {
+    assert.equal(countSubstitutionTokens("/vault/prs/note.md"), null);
+    assert.equal(countSubstitutionTokens(""), null);
   });
 });
 

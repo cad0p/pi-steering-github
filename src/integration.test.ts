@@ -410,9 +410,11 @@ describe("github plugin — PR rules (issue-link + vault body-file policy)", () 
     );
   });
 
-  it("byte-exact substitution keeps blocking via the vault check with the STATIC reason (#43)", async () => {
-    // Form byte-perfect → ok stage → no diagnostic, the static
-    // recipe verbatim — the vault-path check is what blocks here.
+  it("byte-exact substitution outside any vault blocks with mirror + trace + recipe (#50)", async () => {
+    // Form byte-perfect → ok stage → the vault-path check is what
+    // blocks. The reason now mirrors the received path, traces the
+    // walk to the failing vault stage, and ends with the recipe —
+    // with bare VAULT/REPO slots (both undiscovered past the stop).
     const outside = makeFixtureDir();
     const bodyFile = join(outside, "body.md");
     writeFileSync(bodyFile, "Closes #12\n");
@@ -424,14 +426,22 @@ describe("github plugin — PR rules (issue-link + vault body-file policy)", () 
     assert.equal(block, true, "expected block");
     assert.equal(rule, "pr-body-from-vault-file");
     assert.ok(
-      reason.includes(
-        "PR bodies must come from a body file in the napkin vault:",
-      ),
+      reason.includes(`--body-file path as received: ${bodyFile}`),
       `reason: ${reason}`,
     );
+    assert.ok(reason.includes("exists: yes"), `reason: ${reason}`);
+    assert.ok(
+      reason.includes("vault: none — not inside a napkin vault, fail-closed"),
+      `reason: ${reason}`,
+    );
+    assert.ok(reason.includes("VAULT/**/REPO/prs/"), `reason: ${reason}`);
     assert.ok(
       !reason.includes("substitution program diverges"),
-      `reason must stay static for byte-exact forms: ${reason}`,
+      `reason must not take the diff branch for byte-exact forms: ${reason}`,
+    );
+    assert.ok(
+      !reason.includes("<vault>") && !reason.includes("<repo>"),
+      `reason must carry no angle-bracket placeholders: ${reason}`,
     );
   });
 
@@ -1115,5 +1125,136 @@ describe("github plugin — gh-repo-flag-before-subcommand (-R foreign-target ga
     );
     assert.equal(block, true, "expected block");
     assert.equal(rule, "gh-repo-flag-before-subcommand");
+  });
+});
+
+describe("github plugin — body-file mirror + trace reasons (#50)", () => {
+  const repo = "fixture-repo";
+  const remote = `https://github.com/cad0p/${repo}.git`;
+  const host = hostWithRemote(remote);
+
+  it("#48 regression: `<`-prefixed relative path mirrors the `<` (issue)", async () => {
+    // Session-exact typo shape: the shell input-redirection `<` typed
+    // inside the substitution instead of a bare path argument. The
+    // block is a correct fail-closed verdict — and the reason now
+    // shows the `<` via the path-token mirror (before: bare STATIC).
+    const typoPath =
+      "<../Goldmine/personal/github/pcad.it-infra/issues/2026-09-01-issue188-test.md";
+    const { block, rule, reason } = await evaluateBash(
+      makeFixtureDir(),
+      `gh issue create --title "tracking" --body-file <(perl -0777 -pe '${BODY_STRIP}' "${typoPath}")`,
+      host,
+    );
+    assert.equal(block, true, "expected block (verdict unchanged)");
+    assert.equal(rule, "issue-body-from-vault-file");
+    assert.ok(
+      reason.includes(`--body-file path as received: ${typoPath}`),
+      `reason must mirror the typo: ${reason}`,
+    );
+    assert.ok(reason.includes("exists: no"), `reason: ${reason}`);
+  });
+
+  it("#49 regression: `<`-prefixed absolute path mirrors the `<` (pr)", async () => {
+    const fx = makeVaultRepoFixture(repo);
+    const typoPath = `<${fx.prBodyFile}`;
+    const { block, rule, reason } = await evaluateBash(
+      makeFixtureDir(),
+      `gh pr create --title "feat: x (closes #12)" --body-file <(perl -0777 -pe '${BODY_STRIP}' "${typoPath}")`,
+      host,
+    );
+    assert.equal(block, true, "expected block (verdict unchanged)");
+    assert.equal(rule, "pr-body-from-vault-file");
+    assert.ok(
+      reason.includes(`--body-file path as received: ${typoPath}`),
+      `reason must mirror the typo: ${reason}`,
+    );
+    assert.ok(reason.includes("exists: no"), `reason: ${reason}`);
+  });
+
+  it("direct vault path blocks with the verbatim-upload mirror", async () => {
+    const fx = makeVaultRepoFixture(repo);
+    const { block, rule, reason } = await evaluateBash(
+      makeFixtureDir(),
+      `gh pr create --title "feat: x (closes #12)" --body-file "${fx.prBodyFile}"`,
+      host,
+    );
+    assert.equal(block, true, "expected block (verdict unchanged)");
+    assert.equal(rule, "pr-body-from-vault-file");
+    assert.ok(
+      reason.includes(`--body-file path as received: ${fx.prBodyFile}`),
+      `reason: ${reason}`,
+    );
+    assert.ok(
+      reason.includes("direct paths upload verbatim"),
+      `reason: ${reason}`,
+    );
+  });
+
+  it("misplaced vault file blocks with filled vault/repo slots", async () => {
+    // Well-formed but misplaced: an issues/ file for a pr create.
+    // The trace walks to the placement stage with both slots filled.
+    const fx = makeVaultRepoFixture(repo);
+    const { block, rule, reason } = await evaluateBash(
+      makeFixtureDir(),
+      `gh pr create --title "feat: x (closes #12)" --body-file ${stripSubstitution(fx.issueBodyFile)}`,
+      host,
+    );
+    assert.equal(block, true, "expected block (verdict unchanged)");
+    assert.equal(rule, "pr-body-from-vault-file");
+    assert.ok(reason.includes(`vault root: ${fx.vault}`), `reason: ${reason}`);
+    assert.ok(
+      reason.includes(`repo (command cwd): ${repo}`),
+      `reason: ${reason}`,
+    );
+    assert.ok(
+      reason.includes(`is not under ${repo}/prs/ — fail-closed`),
+      `reason: ${reason}`,
+    );
+    assert.ok(
+      reason.includes(`${fx.vault}/**/${repo}/prs/`),
+      `reason: ${reason}`,
+    );
+  });
+
+  it("verdict matrix unchanged: typo shapes stay blocked, valid stays allowed", async () => {
+    // Fail-closed preservation pin for #50: only reasons change.
+    const fx = makeVaultRepoFixture(repo);
+    const cases: { cmd: string; block: boolean; rule: string | null }[] = [
+      {
+        cmd: `gh pr create --title "feat: x (closes #12)" --body-file ${stripSubstitution(fx.prBodyFile)}`,
+        block: false,
+        rule: null,
+      },
+      {
+        cmd: `gh issue create --title "tracking" --body-file ${stripSubstitution(fx.issueBodyFile)}`,
+        block: false,
+        rule: null,
+      },
+      {
+        cmd: `gh pr create --title "feat: x (closes #12)" --body-file <(perl -0777 -pe '${BODY_STRIP}' "<${fx.prBodyFile}")`,
+        block: true,
+        rule: "pr-body-from-vault-file",
+      },
+      {
+        cmd: `gh issue create --title "tracking" --body-file <(perl -0777 -pe '${BODY_STRIP}' "<../Goldmine/note.md")`,
+        block: true,
+        rule: "issue-body-from-vault-file",
+      },
+      {
+        cmd: `gh pr create --title "feat: x (closes #12)" --body-file "${fx.prBodyFile}"`,
+        block: true,
+        rule: "pr-body-from-vault-file",
+      },
+      {
+        cmd: `gh pr create --title "feat: x (closes #12)" --body "Closes #12"`,
+        block: true,
+        rule: "pr-body-from-vault-file",
+      },
+    ];
+    for (const c of cases) {
+      const res = await evaluateBash(makeFixtureDir(), c.cmd, host);
+      assert.equal(res.block, c.block, `verdict flipped for: ${c.cmd}`);
+      if (c.block) assert.equal(res.rule, c.rule, `for: ${c.cmd}`);
+    }
   });
 });
