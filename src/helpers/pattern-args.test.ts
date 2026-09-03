@@ -320,27 +320,40 @@ describe("parseBodyFileArg", () => {
     );
   });
 
-  it("a quote AFTER the ~ still expands (the ~ itself is unquoted)", () => {
-    // Bash keys off whether the leading `~` is quoted: `~"/x"`
-    // expands, `"~"/x` does not.
+  it("any quote at or before the ~/ prefix keeps the path literal", () => {
+    // The shell expands only a lexically-leading unquoted `~/`:
+    // `~"/x"` buries its slash in quotes, `""~/x` opens with
+    // quotes, `"~"/x` quotes the tilde itself — all three stay
+    // literal, verified against bash.
+    for (const pathToken of [
+      '~"/Goldmine/note.md',
+      '""~/Goldmine/note.md',
+      '"~"/Goldmine/note.md',
+    ]) {
+      assert.deepEqual(
+        parseBodyFileArg(
+          `<(perl -0777 -pe '${BODY_STRIP}' ${pathToken})`,
+        ),
+        {
+          kind: "substitution",
+          path: "~/Goldmine/note.md",
+          quoted: true,
+        },
+      );
+    }
+  });
+
+  it("a quote AFTER the first slash still expands", () => {
+    // Quotes past the `~/` prefix do not suppress expansion:
+    // `~/a"b` expands, the quotes only group the tail.
     assert.deepEqual(
       parseBodyFileArg(
-        `<(perl -0777 -pe '${BODY_STRIP}' ~"/Goldmine/note.md")`,
+        `<(perl -0777 -pe '${BODY_STRIP}' ~/Goldmine/"note.md")`,
       ),
       {
         kind: "substitution",
         path: "~/Goldmine/note.md",
         quoted: false,
-      },
-    );
-    assert.deepEqual(
-      parseBodyFileArg(
-        `<(perl -0777 -pe '${BODY_STRIP}' "~"/Goldmine/note.md)`,
-      ),
-      {
-        kind: "substitution",
-        path: "~/Goldmine/note.md",
-        quoted: true,
       },
     );
   });

@@ -307,6 +307,54 @@ describe("missingVaultBodyFile", () => {
     assert.equal(d.blocked, true);
   });
 
+  it('fires for a tilde-quote-split path (~"/…" stays literal)', async () => {
+    // The slash is quoted, so the shell leaves the word alone: the
+    // literal `~/…` joins onto the cwd and fails exists.
+    const home = makeFixtureDir();
+    const fx = makeVaultRepoFixtureAt(home, "fixture-repo");
+    const tildePath = `~${fx.issueBodyFile.slice(home.length)}`;
+    const cwd = makeFixtureDir();
+    const ctx = makeCtx(
+      [
+        { text: "--body-file" },
+        { text: stripSubstitution(`~"${tildePath.slice(1)}"`) },
+      ],
+      cwd,
+      gitRemoteExec("https://github.com/cad0p/fixture-repo.git"),
+      new Map([["HOME", home]]),
+    );
+    assert.equal(await missingVaultBodyFile({ section: "issues" }, ctx), true);
+    const d = await diagnose(ctx, "issues");
+    assert.equal(d.path, tildePath);
+    assert.ok(d.abs?.endsWith(tildePath), d.abs ?? "null abs");
+    assert.equal(d.exists, false);
+    assert.equal(d.blocked, true);
+  });
+
+  it('fires for an empty-quotes-prefixed path (""~/… stays literal)', async () => {
+    // The word opens with quotes, so the leading `~` is quoted: no
+    // expansion, the literal path joins onto the cwd.
+    const home = makeFixtureDir();
+    const fx = makeVaultRepoFixtureAt(home, "fixture-repo");
+    const tildePath = `~${fx.issueBodyFile.slice(home.length)}`;
+    const cwd = makeFixtureDir();
+    const ctx = makeCtx(
+      [
+        { text: "--body-file" },
+        { text: stripSubstitution(`""${tildePath}`) },
+      ],
+      cwd,
+      gitRemoteExec("https://github.com/cad0p/fixture-repo.git"),
+      new Map([["HOME", home]]),
+    );
+    assert.equal(await missingVaultBodyFile({ section: "issues" }, ctx), true);
+    const d = await diagnose(ctx, "issues");
+    assert.equal(d.path, tildePath);
+    assert.ok(d.abs?.endsWith(tildePath), d.abs ?? "null abs");
+    assert.equal(d.exists, false);
+    assert.equal(d.blocked, true);
+  });
+
   it("fires for a `<`-plus-tilde typo (the mirror indicts the `<`)", async () => {
     // `<` is not a tilde — no expansion applies; the opaque token
     // joins onto the cwd and fails exists, with the `<` mirrored.

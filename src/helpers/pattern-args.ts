@@ -284,16 +284,17 @@ export function countSubstitutionTokens(word: string): number | null {
 
 /**
  * A shell word inside a `<( … )` word: the quote-stripped value
- * plus whether the token BEGAN with a quote character.
+ * plus whether the token's tilde prefix is lexically quoted.
  *
  * Stripping is correct for the program byte-pin (quoting style is
  * free — `'PROG'` and `"PROG"` pin identically) but wrong for the
- * path: bash suppresses tilde expansion when the leading `~` is
- * quoted, so the path token must remember its quotedness for the
- * resolver to stay shell-exact. `quoted` keys off the token's
- * first VALUE character (a token whose first value character came
- * from inside quotes has its leading `~` quoted: `"~"/x` does not
- * expand while `~"/x"` — like `""~/x` — still does, bash-exact).
+ * path: the shell expands a leading `~` only when the word begins
+ * with an unquoted `~` and the prefix up to the first unquoted `/`
+ * is unquoted, so the path token must remember its lexical
+ * quotedness for the resolver to stay shell-exact. `quoted` is true
+ * when ANY quote character precedes or covers that prefix:
+ * `"~/x"`, `"~"/x`, `~"/x`, and `""~/x` all stay literal —
+ * only a lexically-leading unquoted `~/` expands.
  */
 interface InnerToken {
   value: string;
@@ -310,42 +311,61 @@ interface InnerToken {
 function tokenizeInner(text: string): InnerToken[] {
   const tokens: InnerToken[] = [];
   let current = "";
-  let quoted = false;
-  let started = false;
+  let raw = "";
   let quote: '"' | "'" | null = null;
   const push = () => {
     if (current !== "") {
-      tokens.push({ value: current, quoted });
-      current = "";
-      quoted = false;
-      started = false;
+      tokens.push({ value: current, quoted: isLexicallyQuoted(raw) });
     }
+    current = "";
+    raw = "";
   };
   for (const ch of text) {
     if (quote !== null) {
+      raw += ch;
       if (ch === quote) {
         quote = null;
       } else {
-        // Empty quotes contribute no value character, so the flag
-        // keys off the first VALUE character, not the first quote:
-        // `""~/x` still expands (bash-exact).
-        if (!started) {
-          quoted = true;
-          started = true;
-        }
         current += ch;
       }
     } else if (ch === '"' || ch === "'") {
       quote = ch;
+      raw += ch;
     } else if (/\s/.test(ch)) {
       push();
     } else {
       current += ch;
-      started = true;
+      raw += ch;
     }
   }
   push();
   return tokens;
+}
+
+/**
+ * Whether a raw token's tilde prefix is lexically quoted: any quote
+ * character in the word up to the first unquoted `/` (the whole word
+ * when there is none) suppresses expansion. `""~/x` opens with a
+ * quote, `~"/x` buries its slash inside quotes — both stay literal,
+ * exactly as the shell leaves them.
+ */
+function isLexicallyQuoted(raw: string): boolean {
+  let quote: '"' | "'" | null = null;
+  let prefix = "";
+  for (const ch of raw) {
+    if (quote !== null) {
+      prefix += ch;
+      if (ch === quote) quote = null;
+    } else if (ch === '"' || ch === "'") {
+      prefix += ch;
+      quote = ch;
+    } else if (ch === "/") {
+      break;
+    } else {
+      prefix += ch;
+    }
+  }
+  return prefix.includes('"') || prefix.includes("'");
 }
 
 /**
