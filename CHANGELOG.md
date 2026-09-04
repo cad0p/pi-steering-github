@@ -43,6 +43,10 @@ All notable changes to this project will be documented in this file.
 
 - Make rule-name extraction tolerant of the block-reason preamble (closes #46) ([#47](https://github.com/cad0p/pi-steering-github/pull/47))
 
+### ⚙️ Miscellaneous Tasks
+
+- Migrate hasFlag/getFlagValue to core root (closes #57)
+
 
 ## [Unreleased]
 
