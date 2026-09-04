@@ -219,7 +219,7 @@ async function evaluateBash(
   reason: string;
 }> {
   const ctx = mockExtensionContext(cwd, host.entries);
-  const harness = loadHarness({ config, host, includeDefaults: true });
+  const harness = loadHarness({ config, host });
   const event = {
     type: "tool_call",
     toolCallId: "tc1",
