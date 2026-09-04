@@ -160,8 +160,8 @@ export const REPO_CREATE_ANCHOR = new RegExp(
  * command REPO-TARGETS is decided by the `foreignRepoTarget`
  * predicate's `-R/--repo` PRESENCE check on the walker argv (#39:
  * presence, not position — subcommand-first `-R x/y pr merge` routes
- * since the widening), via `@cad0p/pi-steering-flags`'
- * `hasFlag`/`getFlagValue` (arg layer, quote-aware). Commands
+ * since the widening), via core's `hasFlag`/`getFlagValue` (P3-promoted
+ * from `@cad0p/pi-steering-flags`; arg layer, quote-aware). Commands
  * without any `-R/--repo` route but are RELEASED by the predicate
  * and fall through to the per-subcommand rules — which NOW match
  * flag-first forms too (same LEADING_FLAG_PAIRS widening), so a
