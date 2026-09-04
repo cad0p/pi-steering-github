@@ -339,10 +339,7 @@ describe("missingVaultBodyFile", () => {
     const tildePath = `~${fx.issueBodyFile.slice(home.length)}`;
     const cwd = makeFixtureDir();
     const ctx = makeCtx(
-      [
-        { text: "--body-file" },
-        { text: stripSubstitution(`""${tildePath}`) },
-      ],
+      [{ text: "--body-file" }, { text: stripSubstitution(`""${tildePath}`) }],
       cwd,
       gitRemoteExec("https://github.com/cad0p/fixture-repo.git"),
       new Map([["HOME", home]]),

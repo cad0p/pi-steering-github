@@ -249,7 +249,43 @@ describe("parseBodyFileArg", () => {
     assert.deepEqual(parseBodyFileArg("/vault/prs/note.md"), {
       kind: "direct",
       path: "/vault/prs/note.md",
+      quoted: false,
     });
+  });
+
+  it("marks a quoted direct path quoted (resolves literally downstream)", () => {
+    // The raw word still wears its quotes here — the direct arm
+    // strips one level and remembers, so a quoted `"~/…"` never
+    // expands onto the wrong file.
+    assert.deepEqual(parseBodyFileArg('"~/Goldmine/note.md"'), {
+      kind: "direct",
+      path: "~/Goldmine/note.md",
+      quoted: true,
+    });
+    assert.deepEqual(parseBodyFileArg("~/Goldmine/note.md"), {
+      kind: "direct",
+      path: "~/Goldmine/note.md",
+      quoted: false,
+    });
+  });
+
+  it("marks a tilde-quote-split direct path quoted", () => {
+    // Inner quotes survive verbatim on the path but still suppress
+    // expansion — resolution keeps the word literal (fail-closed).
+    assert.deepEqual(parseBodyFileArg('~"/Goldmine/note.md'), {
+      kind: "direct",
+      path: '~"/Goldmine/note.md',
+      quoted: true,
+    });
+  });
+
+  it("unwraps an outer-quoted substitution to the same form", () => {
+    assert.deepEqual(
+      parseBodyFileArg(
+        `"<(perl -0777 -pe '${BODY_STRIP}' /vault/prs/note.md)"`,
+      ),
+      { kind: "substitution", path: "/vault/prs/note.md", quoted: false },
+    );
   });
 
   it("keeps a `<`-prefixed path as the opaque path token (#48/#49)", () => {
@@ -331,9 +367,7 @@ describe("parseBodyFileArg", () => {
       '"~"/Goldmine/note.md',
     ]) {
       assert.deepEqual(
-        parseBodyFileArg(
-          `<(perl -0777 -pe '${BODY_STRIP}' ${pathToken})`,
-        ),
+        parseBodyFileArg(`<(perl -0777 -pe '${BODY_STRIP}' ${pathToken})`),
         {
           kind: "substitution",
           path: "~/Goldmine/note.md",

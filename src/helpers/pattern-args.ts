@@ -76,9 +76,12 @@ export function findFlagValue(
 }
 
 /**
- * Value of the first `--body-file` / `-F` occurrence, unquoted.
- * `""` when absent or empty (fail-closed — the caller treats it as
- * missing).
+ * The raw (still-quoted) `--body-file` / `-F` value word: the same
+ * scan as `findBodyFileValue` without the single unquote level.
+ * `""` when absent or empty. The keyword helper parses this form so
+ * the direct arm can see the word's quotes (a quoted leading `~`
+ * stays literal in the shell); every other consumer keeps the
+ * unquoted value.
  *
  * Unlike `findFlagValue`, this scanner ALSO handles the walker-split
  * glued form: the unbash walker splits `--body-file=<( … )` into TWO
@@ -86,23 +89,33 @@ export function findFlagValue(
  * `--body-file=` / `-F=` takes the NEXT word as its value (as the
  * last word there is no next token → `""` → fail-closed block).
  */
-export function findBodyFileValue(ctx: PredicateContext): string {
+export function findBodyFileRawValue(ctx: PredicateContext): string {
   const words = argText(ctx);
   for (let i = 0; i < words.length; i++) {
     const t = words[i]?.text ?? "";
     if (t === "--body-file" || t === "-F") {
-      return unquote(words[i + 1]?.text ?? "");
+      return words[i + 1]?.text ?? "";
     }
     if (t === "--body-file=" || t === "-F=") {
       // Walker-split expansion artifact of `--body-file=<( … )`:
       // the value is the next word.
-      return unquote(words[i + 1]?.text ?? "");
+      return words[i + 1]?.text ?? "";
     }
     if (t.startsWith("--body-file=") || t.startsWith("-F=")) {
-      return unquote(t.slice(t.indexOf("=") + 1));
+      return t.slice(t.indexOf("=") + 1);
     }
   }
   return "";
+}
+
+/**
+ * Value of the first `--body-file` / `-F` occurrence, unquoted.
+ * `""` when absent or empty (fail-closed — the caller treats it as
+ * missing). Exactly `unquote(findBodyFileRawValue(ctx))` — see the
+ * raw form for the scan details.
+ */
+export function findBodyFileValue(ctx: PredicateContext): string {
+  return unquote(findBodyFileRawValue(ctx));
 }
 
 /**
@@ -114,11 +127,13 @@ export function findBodyFileValue(ctx: PredicateContext): string {
  *     napkin vault, `<repo>/<section>/` placement).
  *   - `direct` — any other path-like word (blocked; kept only so
  *     `bodyHasClosingKeyword` can raw-read a direct path in the
- *     disabled-rules combos).
+ *     disabled-rules combos), carrying the same lexical `quoted`
+ *     flag: the word may arrive still-quoted, and a quoted leading
+ *     `~` must resolve literally there too.
  */
 export type BodyFileArg =
   | { kind: "substitution"; path: string; quoted: boolean }
-  | { kind: "direct"; path: string };
+  | { kind: "direct"; path: string; quoted: boolean };
 
 // ---------------------------------------------------------------------------
 // `--body-file` value classification + the byte-diff diagnostic
@@ -153,9 +168,17 @@ export function explainBodyFileArg(
  * behavior could not be guaranteed.
  */
 export function parseBodyFileArg(word: string): BodyFileArg | null {
-  if (word.startsWith("<(")) {
-    if (!word.endsWith(")")) return null;
-    const tokens = tokenizeInner(word.slice(2, -1).trim());
+  // The keyword helper feeds the raw (still-quoted) word so the
+  // direct arm can see its quotes; an outer-quoted substitution
+  // unwraps to the same substitution the unquoted value parses to.
+  const sub = word.startsWith("<(")
+    ? word
+    : isOuterQuoted(word) && unquote(word).startsWith("<(")
+      ? unquote(word)
+      : null;
+  if (sub !== null) {
+    if (!sub.endsWith(")")) return null;
+    const tokens = tokenizeInner(sub.slice(2, -1).trim());
     if (tokens.length === STRIP_COMMAND_TOKENS.length + 1) {
       let pinned = true;
       for (let i = 0; i < STRIP_COMMAND_TOKENS.length; i++) {
@@ -177,8 +200,18 @@ export function parseBodyFileArg(word: string): BodyFileArg | null {
     }
     return null;
   }
-  if (word !== "") return { kind: "direct", path: word };
+  if (word !== "") {
+    const quoted = isLexicallyQuoted(word);
+    const path = isOuterQuoted(word) ? unquote(word) : word;
+    if (path === "") return null;
+    return { kind: "direct", path, quoted };
+  }
   return null;
+}
+
+/** Whether the word is wrapped in one level of matching quotes. */
+function isOuterQuoted(word: string): boolean {
+  return unquote(word) !== word;
 }
 
 /**
@@ -387,13 +420,16 @@ function isLexicallyQuoted(raw: string): boolean {
  * the core helper returns it as-is, no new behavior here).
  *
  * `quoted` is the path token's quotedness from `parseBodyFileArg`
- * (bash suppresses tilde expansion inside quotes): a quoted path
- * resolves literally — `"~/x"` joins onto the cwd and fails the
- * exists check, which is both bash-exact and fail-closed.
+ * (both variants carry it — bash suppresses tilde expansion inside
+ * quotes): a quoted path resolves literally — `"~/x"` joins onto
+ * the cwd and fails the exists check, which is both bash-exact and
+ * fail-closed.
  */
 export function resolveAgainstCwd(
   ctx: PredicateContext,
   path: string,
+  // Fail-open default: an omitted flag expands. Every tilde-capable
+  // caller passes explicitly — keep it that way.
   quoted = false,
 ): string | null {
   const cwd = ctx.cwd;

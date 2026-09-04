@@ -7,7 +7,10 @@
  */
 
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { afterEach, describe, it } from "node:test";
 import type { PredicateContext } from "@cad0p/pi-steering";
 import { bodyHasClosingKeyword } from "./body-keyword.ts";
 import { BODY_STRIP } from "./body-strip.ts";
@@ -61,6 +64,26 @@ function makeCtx(
 /** The pinned substitution form the rules require. */
 function stripSubstitution(file: string): string {
   return `<(perl -0777 -pe '${BODY_STRIP}' ${file})`;
+}
+
+const fixtures: string[] = [];
+
+afterEach(() => {
+  for (const dir of fixtures.splice(0)) {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/** A home dir holding a keyword-bearing direct file at `~/Goldmine/note.md`. */
+function makeHomeWithDirectNote(): { home: string; cwd: string } {
+  const home = mkdtempSync(join(tmpdir(), "github-plugin-kw-home-"));
+  fixtures.push(home);
+  const note = join(home, "Goldmine", "note.md");
+  mkdirSync(dirname(note), { recursive: true });
+  writeFileSync(note, "Closes #12\n\nDirect body.\n");
+  const cwd = mkdtempSync(join(tmpdir(), "github-plugin-kw-cwd-"));
+  fixtures.push(cwd);
+  return { home, cwd };
 }
 
 describe("bodyHasClosingKeyword", () => {
@@ -174,6 +197,33 @@ describe("bodyHasClosingKeyword", () => {
     );
     assert.equal(await bodyHasClosingKeyword(ctx), true);
     assert.deepEqual(seen, ["~/Goldmine/note.md"]);
+  });
+
+  it("reads an unquoted direct ~/… path through expansion", async () => {
+    // Control for the pin below: the bare direct word expands and
+    // the keyword is found.
+    const { home, cwd } = makeHomeWithDirectNote();
+    const ctx = makeCtx(
+      [{ text: "--body-file" }, { text: "~/Goldmine/note.md" }],
+      cwd,
+      perlExec("unused\n"),
+      new Map([["HOME", home]]),
+    );
+    assert.equal(await bodyHasClosingKeyword(ctx), true);
+  });
+
+  it('reads a quoted direct "~/…" path literally (never expands)', async () => {
+    // The shell leaves a quoted leading `~` alone — expanding it
+    // here would read the home file and flip a BLOCK into an ALLOW.
+    // The literal `~/…` joins onto the cwd, misses, and fails closed.
+    const { home, cwd } = makeHomeWithDirectNote();
+    const ctx = makeCtx(
+      [{ text: "--body-file" }, { text: '"~/Goldmine/note.md"' }],
+      cwd,
+      perlExec("unused\n"),
+      new Map([["HOME", home]]),
+    );
+    assert.equal(await bodyHasClosingKeyword(ctx), false);
   });
 
   it("is false for ~/… when HOME is unknown (fail-closed)", async () => {

@@ -24,7 +24,7 @@ import {
 } from "@cad0p/pi-steering";
 import { BODY_STRIP } from "./body-strip.ts";
 import {
-  findBodyFileValue,
+  findBodyFileRawValue,
   findFlagValue,
   parseBodyFileArg,
   resolveAgainstCwd,
@@ -36,7 +36,11 @@ export async function bodyHasClosingKeyword(
   ctx: PredicateContext,
 ): Promise<boolean> {
   const refRe = new RegExp(ISSUE_REF, "i");
-  const value = findBodyFileValue(ctx);
+  // Raw (still-quoted) word: the direct fallback must see the
+  // quotes so a quoted leading `~` resolves literally, as the shell
+  // leaves it. Substitution parsing is identical either way (an
+  // outer-quoted substitution unwraps to the same form).
+  const value = findBodyFileRawValue(ctx);
   if (value !== "") {
     const parsed = parseBodyFileArg(value);
     if (parsed === null) return false; // unparsable value → fail-closed
@@ -65,7 +69,9 @@ export async function bodyHasClosingKeyword(
       }
     }
     // Direct-path fallback (disabled body-file rules): raw content.
-    const abs = resolveAgainstCwd(ctx, parsed.path);
+    // The carried flag keeps a quoted direct `"~/…"` literal —
+    // expanding it would read the wrong file.
+    const abs = resolveAgainstCwd(ctx, parsed.path, parsed.quoted);
     if (abs === null) return false;
     try {
       return refRe.test(readFileSync(abs, "utf8"));
