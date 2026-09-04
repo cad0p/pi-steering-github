@@ -4,6 +4,7 @@ minimumReleaseAgeExclude:
   - '@cad0p/pi-steering'
   - '@cad0p/pi-napkin'
   - '@cad0p/pi-steering-flags'
+  - '@cad0p/unbash-walker'
 # Build-script approval for the @earendil-works/pi-coding-agent peer graph
 # (pulled via @cad0p/pi-steering): genai's postinstall is needed for its JS
 # runtime; protobufjs works without its postinstall.
