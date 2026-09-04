@@ -63,6 +63,16 @@
  */
 
 import type { Plugin, PredicateShape, Rule } from "@cad0p/pi-steering";
+// Side-effect pull of the flags plugin's `PiSteeringPredicates` registry
+// augmentation (`infoOnly`, `requiresFlagValue` leaves used below) —
+// the flags package's documented import-side-effect contract. The
+// `hasFlag`/`getFlagValue` escape-hatch helpers now come from core
+// (P3), so without this the build — which excludes `*.test.ts`, the
+// only remaining imports of the flags package — would lose the
+// predicate names. The module itself is side-effect-free (predicate
+// definitions only); registration still requires listing `flagsPlugin`
+// in the user config's `plugins`.
+import "@cad0p/pi-steering-flags";
 import type { ForeignRepoTargetArgs } from "./predicates/foreign-repo-target.ts";
 import { foreignRepoTarget } from "./predicates/foreign-repo-target.ts";
 import { missingVaultBodyFile } from "./predicates/missing-vault-body-file.ts";

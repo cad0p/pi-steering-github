@@ -37,13 +37,14 @@
  *      or null) → BLOCK.
  *
  * Target resolution (states 2–3) via `getFlagValue` with
- * `{ gluedShorts: ["R"] }` (`@cad0p/pi-steering-flags`, arg layer,
+ * `{ gluedShorts: ["R"] }` (`@cad0p/pi-steering`, arg layer,
  * quote-aware): LAST-wins across the `-R`/`--repo` alias set (gh/
  * cobra collapse repeated spellings of one logical flag to the final
  * value — issue #34), resolving bare `-R`, attached `--repo=`/`-R=`,
  * AND glued short forms like `-Rcad0p/x` (upstream
- * cad0p/pi-steering-flags#11 shipped the opt-in; per-position
- * precedence exact > attached > glued). A trailing valueless alias
+ * cad0p/pi-steering-flags#11 shipped the opt-in, promoted to core in
+ * pi-steering P3; per-position precedence exact > attached > glued).
+ * A trailing valueless alias
  * or an empty attached value as the last occurrence wins and lands
  * in state 2.
  *
@@ -58,7 +59,7 @@
  */
 
 import type { PredicateContext, PredicateHandler } from "@cad0p/pi-steering";
-import { getFlagValue, hasFlag } from "@cad0p/pi-steering-flags";
+import { getFlagValue, hasFlag } from "@cad0p/pi-steering";
 import { repoName } from "../helpers/repo-name.ts";
 
 /**
@@ -106,7 +107,7 @@ export const foreignRepoTarget: PredicateHandler<
     return false;
   }
 
-  // Step 2 — the `-R`/`--repo` target, via `@cad0p/pi-steering-flags`
+  // Step 2 — the `-R`/`--repo` target, via `@cad0p/pi-steering`
   // (arg layer, quote-aware, `--flag=value` + `--flag value` + glued
   // short forms). The alias SET makes the resolution LAST-wins across
   // `-R`/`--repo` (gh/cobra collapse repeated spellings of one
@@ -115,7 +116,7 @@ export const foreignRepoTarget: PredicateHandler<
   // #34). A trailing valueless alias or an empty attached value as
   // the last occurrence wins and fail-closes (null / "" → block
   // below). `gluedShorts: ["R"]` opts into decomposing words shaped
-  // `-R<rest>` at any position (upstream flags#11): slashless rest
+  // `-R<rest>` at any position (upstream flags#11, promoted to core): slashless rest
   // releases via step 4, so quoted body values like "-Rebased onto
   // main" can never cause a false block; a SLASHFUL lookalike body
   // value (`-m "-Rfoo/bar ref"`) hijacks resolution → possible
