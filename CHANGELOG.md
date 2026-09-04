@@ -17,6 +17,7 @@ All notable changes to this project will be documented in this file.
 - *(rules)* Lift the REPO_FLAG_ANCHOR leading-flag cap (? → *) — route any number of leading flag(+value) pairs (closes #41)
 - *(rules)* Dynamic byte-diff block reason for the body-file rules (closes #43)
 - *(rules)* Body-file reasons mirror received path + trace + slotted recipe (closes #50)
+- *(rules)* Expand leading ~ in body-file paths via core helper (closes #53)
 
 ### 🐛 Bug Fixes
 
