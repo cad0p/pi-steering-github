@@ -46,6 +46,7 @@ All notable changes to this project will be documented in this file.
 ### ⚙️ Miscellaneous Tasks
 
 - Migrate hasFlag/getFlagValue to core root (closes #57)
+- Bump flags to CalVer with P3 deletion (closes #57)
 
 
 ## [Unreleased]
