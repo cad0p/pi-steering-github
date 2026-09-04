@@ -21,7 +21,10 @@
  */
 
 import { isAbsolute, resolve } from "node:path";
-import type { PredicateContext } from "@cad0p/pi-steering";
+import {
+  expandTildeIfLeading,
+  type PredicateContext,
+} from "@cad0p/pi-steering";
 import { BODY_STRIP } from "./body-strip.ts";
 
 export { BODY_STRIP };
@@ -73,9 +76,12 @@ export function findFlagValue(
 }
 
 /**
- * Value of the first `--body-file` / `-F` occurrence, unquoted.
- * `""` when absent or empty (fail-closed — the caller treats it as
- * missing).
+ * The raw (still-quoted) `--body-file` / `-F` value word: the same
+ * scan as `findBodyFileValue` without the single unquote level.
+ * `""` when absent or empty. The keyword helper parses this form so
+ * the direct arm can see the word's quotes (a quoted leading `~`
+ * stays literal in the shell); every other consumer keeps the
+ * unquoted value.
  *
  * Unlike `findFlagValue`, this scanner ALSO handles the walker-split
  * glued form: the unbash walker splits `--body-file=<( … )` into TWO
@@ -83,23 +89,33 @@ export function findFlagValue(
  * `--body-file=` / `-F=` takes the NEXT word as its value (as the
  * last word there is no next token → `""` → fail-closed block).
  */
-export function findBodyFileValue(ctx: PredicateContext): string {
+export function findBodyFileRawValue(ctx: PredicateContext): string {
   const words = argText(ctx);
   for (let i = 0; i < words.length; i++) {
     const t = words[i]?.text ?? "";
     if (t === "--body-file" || t === "-F") {
-      return unquote(words[i + 1]?.text ?? "");
+      return words[i + 1]?.text ?? "";
     }
     if (t === "--body-file=" || t === "-F=") {
       // Walker-split expansion artifact of `--body-file=<( … )`:
       // the value is the next word.
-      return unquote(words[i + 1]?.text ?? "");
+      return words[i + 1]?.text ?? "";
     }
     if (t.startsWith("--body-file=") || t.startsWith("-F=")) {
-      return unquote(t.slice(t.indexOf("=") + 1));
+      return t.slice(t.indexOf("=") + 1);
     }
   }
   return "";
+}
+
+/**
+ * Value of the first `--body-file` / `-F` occurrence, unquoted.
+ * `""` when absent or empty (fail-closed — the caller treats it as
+ * missing). Exactly `unquote(findBodyFileRawValue(ctx))` — see the
+ * raw form for the scan details.
+ */
+export function findBodyFileValue(ctx: PredicateContext): string {
+  return unquote(findBodyFileRawValue(ctx));
 }
 
 /**
@@ -111,11 +127,13 @@ export function findBodyFileValue(ctx: PredicateContext): string {
  *     napkin vault, `<repo>/<section>/` placement).
  *   - `direct` — any other path-like word (blocked; kept only so
  *     `bodyHasClosingKeyword` can raw-read a direct path in the
- *     disabled-rules combos).
+ *     disabled-rules combos), carrying the same lexical `quoted`
+ *     flag: the word may arrive still-quoted, and a quoted leading
+ *     `~` must resolve literally there too.
  */
 export type BodyFileArg =
-  | { kind: "substitution"; path: string }
-  | { kind: "direct"; path: string };
+  | { kind: "substitution"; path: string; quoted: boolean }
+  | { kind: "direct"; path: string; quoted: boolean };
 
 // ---------------------------------------------------------------------------
 // `--body-file` value classification + the byte-diff diagnostic
@@ -150,28 +168,50 @@ export function explainBodyFileArg(
  * behavior could not be guaranteed.
  */
 export function parseBodyFileArg(word: string): BodyFileArg | null {
-  if (word.startsWith("<(")) {
-    if (!word.endsWith(")")) return null;
-    const tokens = tokenizeInner(word.slice(2, -1).trim());
+  // The keyword helper feeds the raw (still-quoted) word so the
+  // direct arm can see its quotes; an outer-quoted substitution
+  // unwraps to the same substitution the unquoted value parses to.
+  const sub = word.startsWith("<(")
+    ? word
+    : isOuterQuoted(word) && unquote(word).startsWith("<(")
+      ? unquote(word)
+      : null;
+  if (sub !== null) {
+    if (!sub.endsWith(")")) return null;
+    const tokens = tokenizeInner(sub.slice(2, -1).trim());
     if (tokens.length === STRIP_COMMAND_TOKENS.length + 1) {
       let pinned = true;
       for (let i = 0; i < STRIP_COMMAND_TOKENS.length; i++) {
-        if (tokens[i] !== STRIP_COMMAND_TOKENS[i]) {
+        if (tokens[i]?.value !== STRIP_COMMAND_TOKENS[i]) {
           pinned = false;
           break;
         }
       }
       if (pinned) {
         const path = tokens[STRIP_COMMAND_TOKENS.length];
-        if (path !== undefined && path !== "") {
-          return { kind: "substitution", path };
+        if (path !== undefined && path.value !== "") {
+          return {
+            kind: "substitution",
+            path: path.value,
+            quoted: path.quoted,
+          };
         }
       }
     }
     return null;
   }
-  if (word !== "") return { kind: "direct", path: word };
+  if (word !== "") {
+    const quoted = isLexicallyQuoted(word);
+    const path = isOuterQuoted(word) ? unquote(word) : word;
+    if (path === "") return null;
+    return { kind: "direct", path, quoted };
+  }
   return null;
+}
+
+/** Whether the word is wrapped in one level of matching quotes. */
+function isOuterQuoted(word: string): boolean {
+  return unquote(word) !== word;
 }
 
 /**
@@ -180,7 +220,7 @@ export function parseBodyFileArg(word: string): BodyFileArg | null {
  * the byte offset; otherwise the two full command lines.
  */
 export function renderBodyFileDiff(v: string): string {
-  const tokens = tokenizeInner(v.slice(2, -1).trim());
+  const tokens = tokenizeInner(v.slice(2, -1).trim()).map((t) => t.value);
   const shape = tokens.length === STRIP_COMMAND_TOKENS.length + 1;
   const prefixPinned =
     shape && STRIP_COMMAND_TOKENS.slice(0, 3).every((t, i) => tokens[i] === t);
@@ -276,45 +316,142 @@ export function countSubstitutionTokens(word: string): number | null {
 }
 
 /**
+ * A shell word inside a `<( … )` word: the quote-stripped value
+ * plus whether the token's tilde prefix is lexically quoted.
+ *
+ * Stripping is correct for the program byte-pin (quoting style is
+ * free — `'PROG'` and `"PROG"` pin identically) but wrong for the
+ * path: the shell expands a leading `~` only when the word begins
+ * with an unquoted `~` and the prefix up to the first unquoted `/`
+ * is unquoted, so the path token must remember its lexical
+ * quotedness for the resolver to stay shell-exact. `quoted` is true
+ * when ANY quote character precedes or covers that prefix:
+ * `"~/x"`, `"~"/x`, `~"/x`, and `""~/x` all stay literal —
+ * only a lexically-leading unquoted `~/` expands.
+ */
+interface InnerToken {
+  value: string;
+  quoted: boolean;
+}
+
+/**
  * Shell-style word splitting on the inner text of a `<( … )` word:
  * whitespace separates tokens outside quotes; `"` and `'` quotes are
  * stripped when a token is extracted (equivalent to shell word
  * splitting on the inner text). An unmatched quote just ends the
  * token — the strict token-count + byte-pin downstream fails closed.
  */
-function tokenizeInner(text: string): string[] {
-  const tokens: string[] = [];
+function tokenizeInner(text: string): InnerToken[] {
+  const tokens: InnerToken[] = [];
   let current = "";
+  let raw = "";
   let quote: '"' | "'" | null = null;
+  const push = () => {
+    if (current !== "") {
+      tokens.push({ value: current, quoted: isLexicallyQuoted(raw) });
+    }
+    current = "";
+    raw = "";
+  };
   for (const ch of text) {
     if (quote !== null) {
-      if (ch === quote) quote = null;
-      else current += ch;
+      raw += ch;
+      if (ch === quote) {
+        quote = null;
+      } else {
+        current += ch;
+      }
     } else if (ch === '"' || ch === "'") {
       quote = ch;
+      raw += ch;
     } else if (/\s/.test(ch)) {
-      if (current !== "") {
-        tokens.push(current);
-        current = "";
-      }
+      push();
     } else {
       current += ch;
+      raw += ch;
     }
   }
-  if (current !== "") tokens.push(current);
+  push();
   return tokens;
+}
+
+/**
+ * Whether a raw token's tilde prefix is lexically quoted: any quote
+ * character in the word up to the first unquoted `/` (the whole word
+ * when there is none) suppresses expansion. `""~/x` opens with a
+ * quote, `~"/x` buries its slash inside quotes — both stay literal,
+ * exactly as the shell leaves them.
+ */
+function isLexicallyQuoted(raw: string): boolean {
+  let quote: '"' | "'" | null = null;
+  let prefix = "";
+  for (const ch of raw) {
+    if (quote !== null) {
+      prefix += ch;
+      if (ch === quote) quote = null;
+    } else if (ch === '"' || ch === "'") {
+      prefix += ch;
+      quote = ch;
+    } else if (ch === "/") {
+      break;
+    } else {
+      prefix += ch;
+    }
+  }
+  return prefix.includes('"') || prefix.includes("'");
 }
 
 /**
  * Resolve a possibly-relative path against the command's effective
  * cwd. `null` when the cwd is the walker's `"unknown"` sentinel
  * (fail-closed — the caller treats it as missing).
+ *
+ * A leading `~` expands to `$HOME` first (shell-exact: bash expands
+ * an unquoted leading tilde before the inner command ever sees the
+ * word, so without this a bare `~/…` vault path would join onto the
+ * cwd and over-block). The env is the walker's tracked env at the
+ * command ref when present (it carries `HOME=` overrides), else
+ * `process.env`. Expansion returning `undefined` (HOME unknown)
+ * ALSO yields `null` — fail-closed; `diagnose` renders that arm
+ * with its own explicit trace line (known cwd + null abs can only
+ * mean the expansion failed).
+ *
+ * `~user/…` passes through unchanged (documented upstream limit —
+ * the core helper returns it as-is, no new behavior here).
+ *
+ * `quoted` is the path token's quotedness from `parseBodyFileArg`
+ * (both variants carry it — bash suppresses tilde expansion inside
+ * quotes): a quoted path resolves literally — `"~/x"` joins onto
+ * the cwd and fails the exists check, which is both bash-exact and
+ * fail-closed.
  */
 export function resolveAgainstCwd(
   ctx: PredicateContext,
   path: string,
+  // Fail-open default: an omitted flag expands. Every tilde-capable
+  // caller passes explicitly — keep it that way.
+  quoted = false,
 ): string | null {
   const cwd = ctx.cwd;
   if (typeof cwd !== "string" || cwd === "unknown") return null;
-  return isAbsolute(path) ? path : resolve(cwd, path);
+  const expanded = quoted ? path : expandTildeIfLeading(path, tildeEnv(ctx));
+  if (expanded === undefined) return null;
+  return isAbsolute(expanded) ? expanded : resolve(cwd, expanded);
+}
+
+/**
+ * The env for tilde expansion: the walker's tracked env at the
+ * command ref when present (authoritative — includes `HOME=`
+ * overrides), else the process env projected to a string map.
+ * Exported for the keyword helper, which replicates the same
+ * shell handoff for the pinned perl invocation.
+ */
+export function tildeEnv(ctx: PredicateContext): ReadonlyMap<string, string> {
+  const tracked = ctx.walkerState?.env;
+  if (tracked !== undefined) return tracked;
+  const env = new Map<string, string>();
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value !== undefined) env.set(key, value);
+  }
+  return env;
 }

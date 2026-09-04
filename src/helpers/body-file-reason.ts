@@ -140,8 +140,13 @@ function renderTraceLines(
   section: BodyFileSection,
 ): string[] {
   const lines = [`--body-file path as received: ${d.path ?? d.received}`];
-  if (d.cwd === null || d.abs === null) {
+  if (d.cwd === null) {
     lines.push("resolved against cwd: unknown — fail-closed");
+    return lines;
+  }
+  if (d.abs === null) {
+    // Known cwd + null abs: tilde expansion failed (HOME unknown).
+    lines.push("tilde expansion: HOME unknown — fail-closed");
     return lines;
   }
   lines.push(`resolved against cwd ${d.cwd}: ${d.abs}`);

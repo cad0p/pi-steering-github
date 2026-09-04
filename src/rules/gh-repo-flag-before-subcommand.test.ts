@@ -231,7 +231,7 @@ describe("github plugin — gh-repo-flag-before-subcommand composed gate (engine
       "https://github.com/cad0p/pi-steering-github.git",
     );
     const ctx = mockExtensionContext(cwd, host.entries);
-    const harness = loadHarness({ config, host, includeDefaults: true });
+    const harness = loadHarness({ config, host });
     const event = {
       type: "tool_call",
       toolCallId: "tc1",

@@ -18,13 +18,17 @@
  */
 
 import { readFileSync } from "node:fs";
-import type { PredicateContext } from "@cad0p/pi-steering";
+import {
+  expandTildeIfLeading,
+  type PredicateContext,
+} from "@cad0p/pi-steering";
 import { BODY_STRIP } from "./body-strip.ts";
 import {
-  findBodyFileValue,
+  findBodyFileRawValue,
   findFlagValue,
   parseBodyFileArg,
   resolveAgainstCwd,
+  tildeEnv,
 } from "./pattern-args.ts";
 import { ISSUE_REF } from "./patterns.ts";
 
@@ -32,18 +36,31 @@ export async function bodyHasClosingKeyword(
   ctx: PredicateContext,
 ): Promise<boolean> {
   const refRe = new RegExp(ISSUE_REF, "i");
-  const value = findBodyFileValue(ctx);
+  // Raw (still-quoted) word: the direct fallback must see the
+  // quotes so a quoted leading `~` resolves literally, as the shell
+  // leaves it. Substitution parsing is identical either way (an
+  // outer-quoted substitution unwraps to the same form).
+  const value = findBodyFileRawValue(ctx);
   if (value !== "") {
     const parsed = parseBodyFileArg(value);
     if (parsed === null) return false; // unparsable value → fail-closed
     if (parsed.kind === "substitution") {
       // The pinned one-liner IS the definition of the canonical body.
+      // `ctx.exec` bypasses the shell, so replicate what the shell
+      // would hand perl: an unquoted leading `~` expands to HOME
+      // (tracked env at the command ref, process env fallback),
+      // a quoted one stays literal (bash-exact — perl then fails to
+      // open it, fail-closed). HOME unknown → fail-closed.
+      const expanded = parsed.quoted
+        ? parsed.path
+        : expandTildeIfLeading(parsed.path, tildeEnv(ctx));
+      if (expanded === undefined) return false;
       try {
         const res = await ctx.exec("perl", [
           "-0777",
           "-pe",
           BODY_STRIP,
-          parsed.path,
+          expanded,
         ]);
         if (res.exitCode !== 0) return false;
         return refRe.test(res.stdout ?? "");
@@ -52,7 +69,9 @@ export async function bodyHasClosingKeyword(
       }
     }
     // Direct-path fallback (disabled body-file rules): raw content.
-    const abs = resolveAgainstCwd(ctx, parsed.path);
+    // The carried flag keeps a quoted direct `"~/…"` literal —
+    // expanding it would read the wrong file.
+    const abs = resolveAgainstCwd(ctx, parsed.path, parsed.quoted);
     if (abs === null) return false;
     try {
       return refRe.test(readFileSync(abs, "utf8"));

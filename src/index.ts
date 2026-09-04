@@ -177,6 +177,7 @@ export {
   countSubstitutionTokens,
   EXPECTED_SUBSTITUTION_TOKENS,
   explainBodyFileArg,
+  findBodyFileRawValue,
   findBodyFileValue,
   findFlagValue,
   parseBodyFileArg,

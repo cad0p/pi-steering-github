@@ -30,7 +30,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { defineConfig } from "@cad0p/pi-steering";
@@ -219,7 +219,7 @@ async function evaluateBash(
   reason: string;
 }> {
   const ctx = mockExtensionContext(cwd, host.entries);
-  const harness = loadHarness({ config, host, includeDefaults: true });
+  const harness = loadHarness({ config, host });
   const event = {
     type: "tool_call",
     toolCallId: "tc1",
@@ -1262,5 +1262,77 @@ describe("github plugin — body-file mirror + trace reasons (#50)", () => {
       assert.equal(res.block, c.block, `verdict flipped for: ${c.cmd}`);
       if (c.block) assert.equal(res.rule, c.rule, `for: ${c.cmd}`);
     }
+  });
+});
+
+describe("github plugin — body-file tilde expansion (shell-exact ~/…)", () => {
+  const repo = "fixture-repo";
+  const remote = `https://github.com/cad0p/${repo}.git`;
+  const host = hostWithRemote(remote);
+
+  /**
+   * A vault fixture rooted under the REAL home dir: the real
+   * harness seeds the tracked env from `process.env.HOME`, so a
+   * bare `~/…` path in the typed command expands to this vault
+   * exactly like the Goldmine layout in production. Removed with
+   * the other fixtures in `afterEach`.
+   */
+  function makeHomeVaultRepoFixture(): VaultRepoFixture {
+    const homeBase = mkdtempSync(join(homedir(), "steering-fixture-"));
+    fixtures.push(homeBase);
+    const vault = join(homeBase, "Goldmine");
+    const prsDir = join(vault, "open-source", "github", repo, "prs");
+    const issuesDir = join(vault, "open-source", "github", repo, "issues");
+    mkdirSync(prsDir, { recursive: true });
+    mkdirSync(issuesDir, { recursive: true });
+    mkdirSync(join(vault, ".napkin"), { recursive: true });
+    const prBodyFile = join(prsDir, `2026-08-14-pr1-${repo}-test.md`);
+    writeFileSync(
+      prBodyFile,
+      "---\ntags: [test]\n---\n# Title\n\nCloses #12\n\nBody.\n",
+    );
+    const issueBodyFile = join(issuesDir, `2026-08-14-issue1-${repo}-test.md`);
+    writeFileSync(
+      issueBodyFile,
+      "---\ntags: [test]\n---\n# Title\n\nIssue body text.\n",
+    );
+    return { vault, repo, prBodyFile, issueBodyFile };
+  }
+
+  it("bare ~/… vault path allows (the typed command works)", async () => {
+    const fx = makeHomeVaultRepoFixture();
+    const tildePath = `~${fx.issueBodyFile.slice(homedir().length)}`;
+    assert.ok(tildePath.startsWith("~/"), tildePath);
+    const { block, rule } = await evaluateBash(
+      makeFixtureDir(),
+      `gh issue create --title "tracking" --body-file <(perl -0777 -pe '${BODY_STRIP}' ${tildePath})`,
+      host,
+    );
+    assert.equal(block, false, "bare ~/… must allow");
+    assert.equal(rule, null);
+  });
+
+  it('quoted "~/…" blocks with the literal path in the trace', async () => {
+    // Bash-exact: quotes suppress the expansion — the literal
+    // `~/…` joins onto the cwd and fails exists.
+    const fx = makeHomeVaultRepoFixture();
+    const tildePath = `~${fx.issueBodyFile.slice(homedir().length)}`;
+    const cwd = makeFixtureDir();
+    const { block, rule, reason } = await evaluateBash(
+      cwd,
+      `gh issue create --title "tracking" --body-file <(perl -0777 -pe '${BODY_STRIP}' "${tildePath}")`,
+      host,
+    );
+    assert.equal(block, true, "expected block");
+    assert.equal(rule, "issue-body-from-vault-file");
+    assert.ok(
+      reason.includes(`--body-file path as received: ${tildePath}`),
+      `reason: ${reason}`,
+    );
+    assert.ok(
+      reason.includes(`${cwd}/${tildePath}`),
+      `trace must show the literal join: ${reason}`,
+    );
+    assert.ok(reason.includes("exists: no"), `reason: ${reason}`);
   });
 });

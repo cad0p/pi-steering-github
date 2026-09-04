@@ -133,6 +133,25 @@ describe("renderDiagnosedReason", () => {
     assert.ok(!reason.includes("vault: none"), `reason: ${reason}`);
   });
 
+  it("HOME unknown: explicit expansion line, never exists/vault lines", () => {
+    // Known cwd + null abs (tilde expansion failed): the trace
+    // names the expansion failure instead of the unknown-cwd line.
+    const path = "~/Goldmine/open-source/github/fixture-repo/prs/note.md";
+    const d = base({
+      tag: "ok",
+      received: `<(perl -0777 -pe '${BODY_STRIP}' ${path})`,
+      path,
+      cwd: "/work/fixture-repo",
+      abs: null,
+    });
+    const reason = renderDiagnosedReason(d, "prs");
+    const lines = reason.split("\n");
+    assert.equal(lines[0], `--body-file path as received: ${path}`);
+    assert.equal(lines[1], "tilde expansion: HOME unknown — fail-closed");
+    assert.ok(!reason.includes("exists:"), `reason: ${reason}`);
+    assert.ok(!reason.includes("vault root"), `reason: ${reason}`);
+  });
+
   it("outside-vault shape: stops after exists, vault slot stays bare", () => {
     const d = base({
       tag: "ok",
