@@ -43,7 +43,7 @@
 	},
 	"dependencies": {
 		"@cad0p/pi-napkin": "0.7.0-20260814.0",
-		"@cad0p/pi-steering-flags": "0.1.1-20260824.0"
+		"@cad0p/pi-steering-flags": "0.1.1-20260904.0"
 	},
 	"peerDependencies": {
 		"@cad0p/pi-steering": "0.2.0-20260904.3"

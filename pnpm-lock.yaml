@@ -12,8 +12,8 @@ importers:
         specifier: 0.7.0-20260814.0
         version: 0.7.0-20260814.0(@earendil-works/pi-coding-agent@0.84.1(ws@8.21.3)(zod@4.4.3))(@earendil-works/pi-tui@0.84.1)(@sinclair/typebox@0.34.52)
       '@cad0p/pi-steering-flags':
-        specifier: 0.1.1-20260824.0
-        version: 0.1.1-20260824.0(@cad0p/pi-steering@0.2.0-20260904.3(@earendil-works/pi-coding-agent@0.84.1(ws@8.21.3)(zod@4.4.3)))
+        specifier: 0.1.1-20260904.0
+        version: 0.1.1-20260904.0(@cad0p/pi-steering@0.2.0-20260904.3(@earendil-works/pi-coding-agent@0.84.1(ws@8.21.3)(zod@4.4.3)))
     devDependencies:
       '@biomejs/biome':
         specifier: ^2.3.14
@@ -211,11 +211,11 @@ packages:
       '@earendil-works/pi-tui': '>=0.74.0'
       '@sinclair/typebox': ^0.34.49
 
-  '@cad0p/pi-steering-flags@0.1.1-20260824.0':
-    resolution: {integrity: sha512-nCBI4xUCWHm6IGhSZxd6T/TZW0Mhf++3A/+SlXAEoC23epjtp612nZW5IVRBGfGAsKrPAiEwx0xiH51UHdtUPw==}
+  '@cad0p/pi-steering-flags@0.1.1-20260904.0':
+    resolution: {integrity: sha512-0rPt6h/8pFg3aPB1ZbKbGUiLAJKMSWjGI2zeW2PDERWPhB8tF2vhvr63c7UD0OExlvTKlkuoby8iOrKeU6/9YQ==}
     engines: {node: '>=22'}
     peerDependencies:
-      '@cad0p/pi-steering': ^0.1.0
+      '@cad0p/pi-steering': 0.2.0-20260904.3
 
   '@cad0p/pi-steering@0.2.0-20260904.3':
     resolution: {integrity: sha512-0A4aXl7zPe3egqoJuJafsRusjses63NgR2IeN1+hcewy3CJta3GNKZdMi1zxhr5yz+P4vLoW2LUb0T91RY4pXg==}
@@ -1068,7 +1068,7 @@ snapshots:
       '@earendil-works/pi-tui': 0.84.1
       '@sinclair/typebox': 0.34.52
 
-  '@cad0p/pi-steering-flags@0.1.1-20260824.0(@cad0p/pi-steering@0.2.0-20260904.3(@earendil-works/pi-coding-agent@0.84.1(ws@8.21.3)(zod@4.4.3)))':
+  '@cad0p/pi-steering-flags@0.1.1-20260904.0(@cad0p/pi-steering@0.2.0-20260904.3(@earendil-works/pi-coding-agent@0.84.1(ws@8.21.3)(zod@4.4.3)))':
     dependencies:
       '@cad0p/pi-steering': 0.2.0-20260904.3(@earendil-works/pi-coding-agent@0.84.1(ws@8.21.3)(zod@4.4.3))
 
