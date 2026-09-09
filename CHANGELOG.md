@@ -18,6 +18,7 @@ All notable changes to this project will be documented in this file.
 - *(rules)* Dynamic byte-diff block reason for the body-file rules (closes #43)
 - *(rules)* Body-file reasons mirror received path + trace + slotted recipe (closes #50)
 - *(rules)* Expand leading ~ in body-file paths via core helper (closes #53)
+- Migrate to core command-first bash filter (closes #55) (closes #61) (closes #44)
 
 ### 🐛 Bug Fixes
 
