@@ -2,18 +2,20 @@
 // Part of pi-steering-github.
 
 /**
- * `gh-repo-flag-before-subcommand` pins: the normalized-form anchor
- * surface (routes gated subcommands with any number of leading
- * flag(+value) pairs — both `-R` positions since #39, unbounded
- * count since #41), the declarative when-shape (no
- * unless closure — the basename gate lives in the registered
+ * `gh-repo-flag-before-subcommand` pins: the declarative when-shape
+ * (no unless closure — the basename gate lives in the registered
  * `foreignRepoTarget` predicate, whose own unit tests live in
  * `../predicates/foreign-repo-target.test.ts`), the COMPOSED help
- * carve-out through the real evaluator (the carve-out left the
- * handler for the `not.infoOnly` leaf, so its pins must assert the
- * composed rule — a predicate-level assertion would flip sign and
- * test nothing), and the dynamic ReasonFn output (byte-pinned,
+ * carve-out through the real evaluator (the carve-out lives in the
+ * rule's `not.infoOnly` leaf, so its pins must assert the composed
+ * rule — a predicate-level assertion would flip sign and test
+ * nothing), and the dynamic ReasonFn output (byte-pinned,
  * value-based rendering).
+ *
+ * Routing truth tables (which commands reach the rule at all) live at
+ * the engine level in `../integration.test.ts` — routing is
+ * structural now (`command: "gh"` + `when.subcommand` sequences, core
+ * #117), not a regex surface.
  */
 
 import assert from "node:assert/strict";
@@ -21,124 +23,63 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
-import { defineConfig } from "@cad0p/pi-steering";
+import { defineConfig, type PredicateWord } from "@cad0p/pi-steering";
 import {
   createRecordingHost,
   loadHarness,
+  mockContext,
   mockExtensionContext,
 } from "@cad0p/pi-steering/testing";
-import { flagsPlugin } from "@cad0p/pi-steering-flags";
-import { REPO_FLAG_ANCHOR } from "../helpers/patterns.ts";
-// The composed-gate describe needs the whole plugin object (the
-// rule alone can't evaluate: the not.infoOnly leaf resolves through
-// the flags plugin's registered predicate at evaluation time).
+import { GH_CLI_DESCRIPTOR } from "../descriptors.ts";
+// The composed-gate describe needs the whole plugin object (the rule
+// alone can't evaluate: the `not.infoOnly` + `foreignRepoTarget`
+// leaves resolve through this plugin's registered predicates at
+// evaluation time).
 import { githubPlugin } from "../index.ts";
 import {
   foreignRepoReason,
   ghRepoFlagBeforeSubcommand,
 } from "./gh-repo-flag-before-subcommand.ts";
 
-function blocked(pattern: string | RegExp, normalized: string): boolean {
-  const re = pattern instanceof RegExp ? pattern : new RegExp(pattern);
-  return re.test(normalized);
-}
-
-describe("github plugin — gh-repo-flag-before-subcommand (normalized form)", () => {
-  it("routes gated commands in any flag position and count (shape router)", () => {
-    // Flag-first position.
-    assert.equal(
-      blocked(REPO_FLAG_ANCHOR, "gh -R cad0p/x pr create --title t"),
-      true,
-    );
-    assert.equal(blocked(REPO_FLAG_ANCHOR, "gh -R cad0p/x pr new x"), true);
-    assert.equal(blocked(REPO_FLAG_ANCHOR, "gh -R cad0p/x pr edit 46 x"), true);
-    assert.equal(
-      blocked(REPO_FLAG_ANCHOR, "gh -R cad0p/x pr merge --squash"),
-      true,
-    );
-    assert.equal(
-      blocked(REPO_FLAG_ANCHOR, "gh --repo cad0p/x pr create --title t"),
-      true,
-    );
-    assert.equal(
-      blocked(REPO_FLAG_ANCHOR, "gh --repo=cad0p/x issue create --title t"),
-      true,
-    );
-    assert.equal(blocked(REPO_FLAG_ANCHOR, "gh -Rcad0p/x issue edit 3"), true);
-    assert.equal(
-      blocked(REPO_FLAG_ANCHOR, "gh -R ghe.example.com/org/repo pr edit 46"),
-      true,
-    );
-    // Subcommand-first position (#39): zero leading flags — this IS
-    // the issue class (`gh pr merge --repo=cad0p/x …` used to escape
-    // the gate entirely).
-    assert.equal(
-      blocked(REPO_FLAG_ANCHOR, "gh pr merge --repo=cad0p/x --squash"),
-      true,
-    );
-    assert.equal(
-      blocked(REPO_FLAG_ANCHOR, "gh pr create -R cad0p/x --title t"),
-      true,
-    );
-    assert.equal(blocked(REPO_FLAG_ANCHOR, "gh issue edit 3 -R cad0p/x"), true);
-    // MUST-BLOCK repro pin: the EXACT issue #19 under-block repro
-    // (keyword in --subject). A roster reorder can't silently
-    // re-open the hole: this line pins that the new rule fires
-    // regardless of keywords.
-    assert.equal(
-      blocked(
-        REPO_FLAG_ANCHOR,
-        "gh -R cad0p/x pr merge --squash --subject fix: x (closes #12)",
-      ),
-      true,
-    );
-    // Multi-pair shapes (#41): unbounded leading flag(+value) pairs —
-    // the two-leading-flag under-block is closed.
-    assert.equal(
-      blocked(REPO_FLAG_ANCHOR, "gh --hostname h -R cad0p/other pr merge"),
-      true,
-    );
-    assert.equal(
-      blocked(
-        REPO_FLAG_ANCHOR,
-        "gh --verbose --repo=cad0p/x pr merge --squash",
-      ),
-      true,
-    );
-    // Cross-alias pairs: shape-only routing; last-wins resolution is
-    // predicate-level (pinned there).
-    assert.equal(
-      blocked(REPO_FLAG_ANCHOR, "gh -R x --repo=y/z pr merge"),
-      true,
-    );
-  });
-
-  it("shape router also routes non-repo leading flags and slashless -R (the predicate releases them)", () => {
-    // The router deliberately does NOT decide flag identity or the
-    // `/` requirement — those live in the `foreignRepoTarget`
-    // predicate (arg layer). Non-repo leading flags and slashless
-    // remote-name forms route but are released by the predicate
-    // (absent / slashless states, pinned in
-    // ../predicates/foreign-repo-target.test.ts).
-    assert.equal(blocked(REPO_FLAG_ANCHOR, "gh -v pr create --title t"), true);
-    assert.equal(
-      blocked(REPO_FLAG_ANCHOR, "gh --hostname x pr create --title t"),
-      true,
-    );
-    assert.equal(
-      blocked(REPO_FLAG_ANCHOR, "gh -R upstream pr create --title t"),
-      true,
-    );
-    // Multiple non-repo leading flags route too (#41); the predicate
-    // releases them on absence.
-    assert.equal(
-      blocked(REPO_FLAG_ANCHOR, "gh -v --hostname h pr create --title t"),
-      true,
-    );
-  });
-});
-
 describe("github plugin — gh-repo-flag-before-subcommand (declarative shape)", () => {
+  it("routes command-first: command gh + the six gated subcommand sequences", () => {
+    const rule = ghRepoFlagBeforeSubcommand as unknown as {
+      tool?: unknown;
+      command?: unknown;
+      field?: unknown;
+      pattern?: unknown;
+      when?: {
+        condition?: unknown;
+        not?: { infoOnly?: unknown };
+        foreignRepoTarget?: unknown;
+        subcommand?: unknown;
+      };
+    };
+    assert.equal(rule.tool, "bash");
+    assert.equal(rule.command, "gh");
+    assert.equal(
+      rule.field,
+      undefined,
+      "no field: — bash routing is command: now (core #117)",
+    );
+    assert.equal(
+      rule.pattern,
+      undefined,
+      "no pattern: — the shape router is retired (closes #55)",
+    );
+    assert.deepEqual(rule.when?.subcommand, {
+      anyOf: [
+        ["pr", "create"],
+        ["pr", "new"],
+        ["pr", "edit"],
+        ["pr", "merge"],
+        ["issue", "create"],
+        ["issue", "edit"],
+      ],
+      onUnknown: "allow",
+    });
+  });
+
   it("gates declaratively: not.infoOnly + foreignRepoTarget, zero condition code", () => {
     const rule = ghRepoFlagBeforeSubcommand as unknown as {
       unless?: unknown;
@@ -175,13 +116,13 @@ describe("github plugin — gh-repo-flag-before-subcommand (declarative shape)",
 });
 
 describe("github plugin — gh-repo-flag-before-subcommand composed gate (engine eval)", () => {
-  // The help carve-out left the handler (it lives in the rule's
-  // `not.infoOnly` leaf now), so its pins assert the COMPOSED rule
-  // through the REAL evaluator pipeline (defineConfig + loadHarness
-  // + recording host — same fixture pattern as
-  // ../integration.test.ts). flagsPlugin supplies the `infoOnly`
-  // registry entry; without it the leaf hits UnknownPredicateError.
-  const config = defineConfig({ plugins: [flagsPlugin, githubPlugin] });
+  // The help carve-out lives in the rule's `not.infoOnly` leaf, so
+  // its pins assert the COMPOSED rule through the REAL evaluator
+  // pipeline (defineConfig + loadHarness + recording host — same
+  // fixture pattern as ../integration.test.ts). The `infoOnly` leaf
+  // resolves through this plugin's own (vendored) registered
+  // predicate at evaluation time.
+  const config = defineConfig({ plugins: [githubPlugin] });
 
   const fixtures: string[] = [];
 
@@ -275,6 +216,10 @@ describe("github plugin — gh-repo-flag-before-subcommand composed gate (engine
   });
 
   it("glued lookalikes (--helper, -hx) do NOT exempt", async () => {
+    // `--helper` is not a long match (longs never bundle-match);
+    // `-hx` is bundle-shaped but the facade's info-only check is
+    // bundle-blind (entry-based, glue needs a takesValue entry) — so
+    // neither counts as `-h`.
     for (const cmd of [
       "gh -R cad0p/other pr merge --squash --helper",
       "gh -R cad0p/other pr merge --squash -hx",
@@ -299,13 +244,11 @@ describe("github plugin — gh-repo-flag-before-subcommand composed gate (engine
   });
 
   it("glue-aware: own-repo -Rcad0p/x RELEASES into the merge policy, foreign blocks (e2e)", async () => {
-    // Upstream cad0p/pi-steering-flags#11 adoption (`{ gluedShorts:
-    // ["R"] }`): the walker keeps `-Rcad0p/…` as ONE word and target
-    // resolution now sees it — own repo basename-matches → the gate
-    // releases (#41: the released command LANDS on
-    // pr-merge-needs-closing-keywords — no --subject here, so THAT
-    // policy blocks; pre-#41-widening this was a clean allow, i.e. a
-    // subject-policy bypass); foreign owner/repo → block by the
+    // Table-derived glue (`R`): the walker keeps `-Rcad0p/…` as ONE
+    // word and target resolution now sees it — own repo
+    // basename-matches → the gate releases (the released command
+    // LANDS on pr-merge-needs-closing-keywords — no --subject here,
+    // so THAT policy blocks); foreign owner/repo → block by the
     // redirect.
     const own = await evaluateBash(
       makeFixtureDir(),
@@ -338,10 +281,10 @@ describe("github plugin — gh-repo-flag-before-subcommand composed gate (engine
   });
 
   it("fall-through: no -R anywhere reaches the closing-keywords rule", async () => {
-    // `gh pr merge --squash` now ROUTES the foreign gate first (zero
-    // leading flags) — but carries no repo flag, so the predicate
-    // releases and the NEXT rule in the roster fires. Asserting a
-    // DIFFERENT rule name proves the fall-through.
+    // `gh pr merge --squash` routes the foreign gate first — but
+    // carries no repo flag, so the predicate releases and the NEXT
+    // rule in the roster fires. Asserting a DIFFERENT rule name
+    // proves the fall-through.
     const { block, rule } = await evaluateBash(
       makeFixtureDir(),
       "gh pr merge --squash",
@@ -371,15 +314,57 @@ describe("github plugin — gh-repo-flag-before-subcommand composed gate (engine
 });
 
 describe("github plugin — gh-repo-flag-before-subcommand ReasonFn (dynamic)", () => {
+  /**
+   * Walker-faithful words: whitespace separates outside quotes;
+   * `"…"` groups stay ONE word (text keeps the quotes, value is the
+   * resolved inner text).
+   */
+  function splitWords(command: string): PredicateWord[] {
+    const out: PredicateWord[] = [];
+    let text = "";
+    let value = "";
+    let quote: string | null = null;
+    const push = () => {
+      if (text !== "") {
+        out.push({ value, text, rawText: text, pos: 0, end: text.length });
+        text = "";
+        value = "";
+      }
+    };
+    for (const ch of command) {
+      if (quote !== null) {
+        text += ch;
+        if (ch === quote) quote = null;
+        else value += ch;
+      } else if (ch === '"' || ch === "'") {
+        quote = ch;
+        text += ch;
+      } else if (/\s/.test(ch)) {
+        push();
+      } else {
+        text += ch;
+        value += ch;
+      }
+    }
+    push();
+    return out;
+  }
+
   function ctxWith(command: string): Parameters<typeof foreignRepoReason>[0] {
-    const args = command.split(/\s+/).map((text) => ({ text }));
-    return { input: { args } } as unknown as Parameters<
-      typeof foreignRepoReason
-    >[0];
+    return mockContext({
+      cwd: "/home/me/pi-steering-github",
+      input: {
+        tool: "bash",
+        command,
+        basename: "gh",
+        args: splitWords(command).slice(1),
+      },
+      descriptors: { gh: GH_CLI_DESCRIPTOR },
+    });
   }
 
   // Value-based rendering (#39): the reason names WHERE to cd, drawn
-  // from the SAME getFlagValue call the verdict used — no flag-spelling
+  // from the SAME facade call the verdict used — no flag-spelling
   // echo. Shared REQUIREMENT tail across every form.
   const requirementTail =
     "REQUIREMENT: run a foreign subagent maintainer loop until good,\n" +
@@ -421,7 +406,7 @@ describe("github plugin — gh-repo-flag-before-subcommand ReasonFn (dynamic)", 
   });
 
   it("--repo=x/y glued long form renders the resolved value", () => {
-    // The walker keeps `--repo=x/y` glued as ONE word; getFlagValue
+    // The walker keeps `--repo=x/y` glued as ONE word; the facade
     // resolves the attached value.
     const reason = foreignRepoReason(
       ctxWith("gh --repo=cad0p/x issue create --title t"),
@@ -434,8 +419,8 @@ describe("github plugin — gh-repo-flag-before-subcommand ReasonFn (dynamic)", 
   });
 
   it("-Rx/y glued short form renders the resolved value", () => {
-    // The walker keeps `-Rx/y` glued as ONE word; glue-aware
-    // resolution decomposes it.
+    // The walker keeps `-Rx/y` glued as ONE word; table-derived glue
+    // decomposes it.
     const reason = foreignRepoReason(ctxWith("gh -Rcad0p/x issue edit 3"));
     assert.equal(
       reason,
@@ -445,7 +430,7 @@ describe("github plugin — gh-repo-flag-before-subcommand ReasonFn (dynamic)", 
   });
 
   it("cross-alias command renders the EFFECTIVE (last-wins) target", () => {
-    // Rendering shares getFlagValue's LAST-flag-wins scan: the
+    // Rendering shares the facade's LAST-flag-wins scan: the
     // overridden early `-R cad0p/a` is NOT named — the redirect points
     // at what gh will actually target (`--repo cad0p/b`).
     const reason = foreignRepoReason(
@@ -460,7 +445,7 @@ describe("github plugin — gh-repo-flag-before-subcommand ReasonFn (dynamic)", 
 
   it("unparsable target (empty attached last) renders the honest fallback", () => {
     // First-fires-wins display parity with the fail-closed verdict:
-    // the trailing glued `--repo=` is the effective (empty) target —
+    // the trailing `--repo=` is the effective (empty) target —
     // no flag spelling is echoed, the fallback phrase says why.
     const reason = foreignRepoReason(
       ctxWith("gh -R cad0p/a pr create --repo="),
@@ -483,18 +468,18 @@ describe("github plugin — gh-repo-flag-before-subcommand ReasonFn (dynamic)", 
 
   it("a lookalike VALUE word renders exactly what the over-block keyed on", () => {
     // Single source of truth cuts both ways: a slashful `-R`-shaped
-    // value (`-m "-Rfoo/bar ref"`) hijacks resolution (accepted
-    // flags#11 class) AND the redirect — the reason names `foo/bar`,
-    // i.e. precisely the target the fail-closed block resolved.
-    // Display can no longer diverge from the verdict: both read the
-    // same call. (A slashless lookalike releases upstream and is
-    // never rendered at all.)
+    // value (`-m "-Rfoo/bar ref"`, ONE walker word) hijacks resolution
+    // (accepted table-glue class) AND the redirect — the reason names
+    // the full glued value, i.e. precisely the target the fail-closed
+    // block resolved. Display can no longer diverge from the verdict:
+    // both read the same call. (A slashless lookalike releases
+    // upstream and is never rendered at all.)
     const reason = foreignRepoReason(
-      ctxWith("gh -Rcad0p/pi-steering-github pr edit 46 -m -Rfoo/bar ref"),
+      ctxWith('gh -Rcad0p/pi-steering-github pr edit 46 -m "-Rfoo/bar ref"'),
     );
     assert.equal(
       reason,
-      "The PR you're targeting via foo/bar belongs to a foreign repo.\n" +
+      "The PR you're targeting via foo/bar ref belongs to a foreign repo.\n" +
         requirementTail,
     );
   });

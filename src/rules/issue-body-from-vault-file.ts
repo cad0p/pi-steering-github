@@ -10,9 +10,9 @@
  * argument is additionally validated (see `missingVaultBodyFile`):
  * it must resolve to a real file inside a napkin vault under
  * `<repo>/issues/`. No keyword requirement (issues close nothing).
- * The anchor matches ANY leading-flag position (#41, shared
- * `LEADING_FLAG_PAIRS` unit) — a gate-released flag-first form lands
- * here instead of bypassing the policy.
+ * Routes on `command: "gh"` + the `subcommand:` sequences — ANY
+ * leading-flag position is structural now, so a gate-released
+ * flag-first form lands here instead of bypassing the policy.
  *
  * Strict — no override (schema default).
  *
@@ -35,7 +35,6 @@ import {
   findBodyFileValue,
   renderBodyFileDiff,
 } from "../helpers/pattern-args.ts";
-import { ISSUE_BODY_ANCHOR } from "../helpers/patterns.ts";
 import { diagnose } from "../predicates/missing-vault-body-file.ts";
 
 /** The canonical static recipe (byte-identity pinned in `index.test.ts`). */
@@ -44,9 +43,17 @@ const STATIC = renderStaticRecipe("issues");
 export const issueBodyFromVaultFile = {
   name: "issue-body-from-vault-file",
   tool: "bash",
-  field: "command",
-  pattern: ISSUE_BODY_ANCHOR,
-  when: { missingVaultBodyFile: { section: "issues" } },
+  command: "gh",
+  when: {
+    subcommand: {
+      anyOf: [
+        ["issue", "create"],
+        ["issue", "edit"],
+      ],
+      onUnknown: "allow",
+    },
+    missingVaultBodyFile: { section: "issues" },
+  },
   reason: async (ctx) => {
     const v = findBodyFileValue(ctx);
     if (explainBodyFileArg(v) === "diff") {

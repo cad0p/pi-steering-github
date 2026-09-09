@@ -15,7 +15,9 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, it } from "node:test";
-import type { PredicateContext } from "@cad0p/pi-steering";
+import type { PredicateContext, PredicateWord } from "@cad0p/pi-steering";
+import { mockContext } from "@cad0p/pi-steering/testing";
+import { GH_CLI_DESCRIPTOR } from "../descriptors.ts";
 import { BODY_STRIP } from "../helpers/pattern-args.ts";
 import { diagnose, missingVaultBodyFile } from "./missing-vault-body-file.ts";
 
@@ -25,7 +27,7 @@ import { diagnose, missingVaultBodyFile } from "./missing-vault-body-file.ts";
 
 type ExecStub = (
   cmd: string,
-  args: string[],
+  args: readonly string[],
   opts?: { cwd?: string },
 ) => Promise<{ stdout: string; stderr: string; exitCode: number }>;
 
@@ -40,24 +42,33 @@ function makeCtx(
   cwd: string,
   exec?: ExecStub,
   env?: ReadonlyMap<string, string>,
+  command = "gh pr create",
 ): PredicateContext {
-  const ctx = {
+  // mockContext binds the `ctx.command` facade through the owned gh
+  // descriptor (the same binding production uses); `"…"` words
+  // unwrap to their resolved value, exactly as the walker reports
+  // them. `command` defaults to the create form and is overridden
+  // per-case.
+  const words: PredicateWord[] = args.map(({ text }) => {
+    if (text.length >= 2 && text.startsWith('"') && text.endsWith('"')) {
+      const value = text.slice(1, -1);
+      return { value, text, rawText: text, pos: 0, end: text.length };
+    }
+    return { value: text, text, rawText: text, pos: 0, end: text.length };
+  });
+  return mockContext({
     cwd,
-    tool: "bash",
-    input: { tool: "bash", command: "gh pr create", basename: "gh", args },
-    agentLoopIndex: 0,
+    input: { tool: "bash", command, basename: "gh", args: words },
+    descriptors: { gh: GH_CLI_DESCRIPTOR },
     exec:
       exec ??
-      (async (_cmd, _args) => ({
+      (async (_cmd, _args: readonly string[]) => ({
         stdout: "",
         stderr: "",
         exitCode: 0,
       })),
-    appendEntry: () => {},
-    findEntries: () => [],
-    walkerState: env !== undefined ? { cwd, env } : {},
-  };
-  return ctx as unknown as PredicateContext;
+    ...(env !== undefined ? { walkerState: { cwd, env } } : {}),
+  });
 }
 
 // ---------------------------------------------------------------------------

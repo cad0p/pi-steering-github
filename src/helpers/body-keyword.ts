@@ -22,10 +22,10 @@ import {
   expandTildeIfLeading,
   type PredicateContext,
 } from "@cad0p/pi-steering";
+import { GH_BODY_FLAG } from "../descriptors.ts";
 import { BODY_STRIP } from "./body-strip.ts";
 import {
   findBodyFileRawValue,
-  findFlagValue,
   parseBodyFileArg,
   resolveAgainstCwd,
   tildeEnv,
@@ -79,7 +79,11 @@ export async function bodyHasClosingKeyword(
       return false;
     }
   }
-  const inline = findFlagValue(ctx, ["--body", "-b"]);
+  // Inline fallback (disabled body-file rules): last-wins across the
+  // --body/-b aliases via the bound facade — the same gh/cobra
+  // semantics the merge rule's requiresFlagValue leaf enforces (the
+  // old first-occurrence scan is retired).
+  const inline = ctx.command.getFlagValue(GH_BODY_FLAG);
   if (inline !== null) return refRe.test(inline);
   return false;
 }
