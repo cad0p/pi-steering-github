@@ -44,9 +44,9 @@ import { BODY_STRIP } from "./helpers/body-strip.ts";
 import { githubPlugin } from "./index.ts";
 
 // The declarative when leaves (`not.infoOnly`, `requiresFlagValue`)
-// that pr-merge-needs-closing-keywords composes are vendored INTO
-// this plugin (interim — no flags publish works with core
-// 0.2.0-20260908.x yet), so the config lists githubPlugin alone.
+// that pr-merge-needs-closing-keywords composes are provided by
+// `@cad0p/pi-steering-flags` (re-adopted dep — single source of truth),
+// so the config lists githubPlugin alone.
 const config = defineConfig({ plugins: [githubPlugin] });
 
 /** Fixture dirs created per test, cleaned up after. */

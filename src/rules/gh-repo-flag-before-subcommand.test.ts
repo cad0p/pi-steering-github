@@ -120,8 +120,8 @@ describe("github plugin — gh-repo-flag-before-subcommand composed gate (engine
   // its pins assert the COMPOSED rule through the REAL evaluator
   // pipeline (defineConfig + loadHarness + recording host — same
   // fixture pattern as ../integration.test.ts). The `infoOnly` leaf
-  // resolves through this plugin's own (vendored) registered
-  // predicate at evaluation time.
+  // resolves through this plugin's own registered predicate
+  // (re-exported from `@cad0p/pi-steering-flags`) at evaluation time.
   const config = defineConfig({ plugins: [githubPlugin] });
 
   const fixtures: string[] = [];

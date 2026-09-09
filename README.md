@@ -19,8 +19,8 @@ One `Plugin` (`name: "github"`) with six rules and four predicates. Every rule r
 | --- | --- |
 | `missingVaultBodyFile` | true when `--body-file` is absent, not the pinned `<(perl -0777 -pe '<BODY_STRIP>' <file>)` substitution form, or the path fails the vault check (nonexistent, outside a napkin vault, not under `<repo>/<section>/`) — except an `edit` carrying no body-affecting flag (`--body`/`-b`, `--body-file`/`-F`), which passes (#44) |
 | `foreignRepoTarget` | three states over the invocation's `-R/--repo`: ABSENT → released (falls through to the per-subcommand rules); PRESENT-unparsable → fail-closed; PRESENT-parsable → true when the effective target's basename differs from the cwd repo's basename (foreign). Fail-closed on unknown cwd / unresolvable repo too |
-| `infoOnly` | true when the command IS an info-only invocation (`--help` / `--version` + additive `extraFlags`) — vendored from `@cad0p/pi-steering-flags` (interim, see [Usage](#usage)) |
-| `requiresFlagValue` | true when the last-wins value of a flag alias set is absent, valueless, or fails `matches` — vendored from `@cad0p/pi-steering-flags` (interim, see [Usage](#usage)) |
+| `infoOnly` | true when the command IS an info-only invocation (`--help` / `--version` + additive `extraFlags`) — from `@cad0p/pi-steering-flags` (see [Usage](#usage)) |
+| `requiresFlagValue` | true when the last-wins value of a flag alias set is absent, valueless, or fails `matches` — from `@cad0p/pi-steering-flags` (see [Usage](#usage)) |
 
 All rules are **strict** — no `noOverride: false`, so there is no agent-side override escape hatch. The policy is unconditional.
 
@@ -50,8 +50,6 @@ src/
 │   ├── missing-vault-body-file.test.ts
 │   ├── foreign-repo-target.ts      # the -R foreign-target gate handler
 │   ├── foreign-repo-target.test.ts
-│   ├── info-only.ts                # when.infoOnly — vendored from pi-steering-flags (interim)
-│   └── requires-flag-value.ts      # when.requiresFlagValue — vendored from pi-steering-flags (interim)
 └── rules/
     ├── gh-repo-flag-before-subcommand.ts + .test.ts
     ├── pr-body-from-vault-file.ts
@@ -81,13 +79,10 @@ export default defineConfig({
 });
 ```
 
-The `infoOnly` + `requiresFlagValue` leaves the rules compose are
-vendored INTO this plugin (same `when` key names, same shapes) — no
-`flagsPlugin` needed. Interim: no `@cad0p/pi-steering-flags` publish
-works with core `0.2.0-20260908.x` yet (its 0.1.1 line imports core
-root helpers deleted by the #117 command-first breakage). When flags
-republishes with #117 support the vendored copies delete and the
-`flagsPlugin` requirement returns — rule `when`-clauses and user
+The `infoOnly` + `requiresFlagValue` leaves the rules compose come
+from `@cad0p/pi-steering-flags` (runtime dep, single source of truth —
+re-exported through this plugin under the same `when` key names, so no
+`flagsPlugin` needed in the config). Rule `when`-clauses and user
 configs are untouched either way (the keys don't change, only the
 provider).
 
@@ -102,7 +97,7 @@ Listing the plugins feeds their rule/predicate names into `defineConfig`'s type 
 The gate keys on `-R/--repo` **PRESENCE, not position**: covered are `-R x/y`, `--repo x/y`, `--repo=x/y`, `-Rx/y` in ANY flag position (`gh --hostname h -R x/y pr merge` routes — the descriptor's consuming-flag arity keeps extraction exact) OR anywhere on the gated subcommand line. A command carrying NO `-R/--repo` anywhere is released untouched — and the per-subcommand sequences match flag-first forms too, so a released command LANDS on its vault-body/keyword policy instead of bypassing the stack (pre-#41 a released one-pair form escaped every policy). Non-repo leading flags (`-v`, `--hostname`) route but release on absence — landing on those same policies; note that a real repo flag after them blocks at the gate (`-v … --repo=<foreign>` escaped the gate before #39). The gate is **fully declarative** — zero condition code, a `subcommand:` router plus an AND of two registered-predicate leaves:
 
 - `foreignRepoTarget: true` — this package's registered predicate: blocks when the EFFECTIVE `-R`/`--repo` target is a foreign repo (reads through the bound `ctx.command` facade; glue for `R` derives from the owned descriptor — no call-site arity).
-- `not.infoOnly({ extraFlags: ["-h"] })` — the read-only carve-out, below (vendored leaf, same key).
+- `not.infoOnly({ extraFlags: ["-h"] })` — the read-only carve-out, below (flags leaf, same key).
 
 Target resolution is **last-wins across the `-R`/`--repo` aliases**, matching gh/cobra (repeated spellings of one logical flag collapse to their final value): when both aliases occur, the LAST occurrence is the effective target, and a trailing valueless alias or an empty attached value as the last occurrence fails closed instead of falling back to the overridden earlier alias. The reason renders the EFFECTIVE target from the same resolution call the verdict used — `via cad0p/x` — so the redirect names where to cd; an unparsable target renders the honest fallback phrase instead of echoing a flag spelling:
 
@@ -142,7 +137,7 @@ Flag-first creates (`gh -v -R x/y pr create --title t`) route structurally, so g
 
 ### `pr-merge-needs-closing-keywords`
 
-`gh pr merge` must carry a closing keyword + `#N` in the `--subject` value (commit subject) — short `-t` form, `--flag=value` forms. GitHub scans the whole squash commit message for closing keywords, so the commit subject alone closes the issues; the commit body is optional at merge. Flag-first merges (`gh -v --hostname h pr merge --squash`) route structurally and still block without a keyword, so gate-released merges land on this policy. The gate is **fully declarative** — zero condition code: `when.not.infoOnly(["-h"])` exempts read-only `--help`, `--version`, and GitHub's additive `-h` (attached forms `--help=value`, `--version=1`, `-h=value` included; `-v` stays gated), and `when.requiresFlagValue({ flags: ["--subject", "-t"], matches: ISSUE_REF })` enforces the subject check with gh/cobra last-flag-wins semantics across the two aliases — absent, valueless, or non-matching values block. Both leaves are this package's vendored predicates (same keys as `@cad0p/pi-steering-flags`, interim — see [Usage](#usage)) over walker-parsed argv, so quoted values such as `--subject "see --help"` can't falsely exempt. An exact quoted value equal to an info token (for example `--subject "--help"`) is indistinguishable from a bare flag after quote removal and is an accepted limitation.
+`gh pr merge` must carry a closing keyword + `#N` in the `--subject` value (commit subject) — short `-t` form, `--flag=value` forms. GitHub scans the whole squash commit message for closing keywords, so the commit subject alone closes the issues; the commit body is optional at merge. Flag-first merges (`gh -v --hostname h pr merge --squash`) route structurally and still block without a keyword, so gate-released merges land on this policy. The gate is **fully declarative** — zero condition code: `when.not.infoOnly(["-h"])` exempts read-only `--help`, `--version`, and GitHub's additive `-h` (attached forms `--help=value`, `--version=1`, `-h=value` included; `-v` stays gated), and `when.requiresFlagValue({ flags: ["--subject", "-t"], matches: ISSUE_REF })` enforces the subject check with gh/cobra last-flag-wins semantics across the two aliases — absent, valueless, or non-matching values block. Both leaves are `@cad0p/pi-steering-flags` predicates (same keys, see [Usage](#usage)) over walker-parsed argv, so quoted values such as `--subject "see --help"` can't falsely exempt. An exact quoted value equal to an info token (for example `--subject "--help"`) is indistinguishable from a bare flag after quote removal and is an accepted limitation.
 
 ### `issue-body-from-vault-file`
 
@@ -196,9 +191,9 @@ Non-seed flags (`--source`, `--push`, `--clone`, `--description`, `--public|--pr
 
 `when.foreignRepoTarget` is a boolean leaf (core `BooleanLeafArgs`: `true` / `{ value: true }` enable the gate, `false` never fires — deliberately not inverted) and takes no arguments on purpose — the basename policy IS the semantics (#19), there is no `matchBy`/`flags` knob. Flag access reads through the bound `ctx.command` facade (glue + consumption from the owned gh descriptor). It collapses every routed command into one of three states: ABSENT (no `-R`/`--repo` anywhere — space, attached, or glued forms) → release (fall-through to the per-subcommand rules); PRESENT-unparsable (valueless or empty-valued LAST alias occurrence) → fail-closed block; PRESENT-parsable → slashless remote-name release, then basename compare against the cwd repo. Fail-closed rails remain: walker-unknown cwd, unresolvable repo.
 
-### `infoOnly` / `requiresFlagValue` (vendored, interim)
+### `infoOnly` / `requiresFlagValue` (from `@cad0p/pi-steering-flags`)
 
-Same `when` key names and arg shapes as `@cad0p/pi-steering-flags` (`infoOnly: true | { extraFlags }`, `requiresFlagValue: { flags, matches }`), implemented over the bound `ctx.command` facade because no flags publish works with core `0.2.0-20260908.x` yet (see [Usage](#usage)). Two command-first deltas, both gh-faithful: value resolution consumes + glues via the owned descriptor (spellings with no table row never consume — the remedy is a table row), and the info-only check stays bundle-blind like the flags original. When flags republishes with #117 support these delete and the provider moves back — keys, shapes, and verdicts for table-listed spellings are unchanged.
+Same `when` key names and arg shapes as `@cad0p/pi-steering-flags` (`infoOnly: true | { extraFlags }`, `requiresFlagValue: { flags, matches }`), re-exported through this plugin (single source of truth — see [Usage](#usage)). Both read through the bound `ctx.command` facade: value resolution consumes + glues via the owned descriptor (spellings with no table row never consume — the remedy is a table row), and the info-only check stays bundle-blind like the flags original. Keys, shapes, and verdicts for table-listed spellings are unchanged.
 
 ## Disabling
 

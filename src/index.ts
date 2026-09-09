@@ -63,14 +63,15 @@
  */
 
 import type { Plugin, PredicateShape, Rule } from "@cad0p/pi-steering";
-import { GH_CLI_DESCRIPTOR } from "./descriptors.ts";
-import { foreignRepoTarget } from "./predicates/foreign-repo-target.ts";
-import { type InfoOnlyArgs, infoOnly } from "./predicates/info-only.ts";
-import { missingVaultBodyFile } from "./predicates/missing-vault-body-file.ts";
 import {
+  type InfoOnlyArgs,
+  infoOnly,
   type RequiresFlagValueArgs,
   requiresFlagValue,
-} from "./predicates/requires-flag-value.ts";
+} from "@cad0p/pi-steering-flags";
+import { GH_CLI_DESCRIPTOR } from "./descriptors.ts";
+import { foreignRepoTarget } from "./predicates/foreign-repo-target.ts";
+import { missingVaultBodyFile } from "./predicates/missing-vault-body-file.ts";
 import { ghRepoCreateNeedsSeed } from "./rules/gh-repo-create-needs-seed.ts";
 import { ghRepoFlagBeforeSubcommand } from "./rules/gh-repo-flag-before-subcommand.ts";
 import { issueBodyFromVaultFile } from "./rules/issue-body-from-vault-file.ts";
@@ -121,20 +122,17 @@ declare global {
     /**
      * `when.infoOnly` — fires when the command IS an info-only
      * invocation (`--help` / `--version` + additive `extraFlags`).
-     * VENDORED from `@cad0p/pi-steering-flags` (interim — no flags
-     * publish works with core 0.2.0-20260908.x yet; see
-     * `./predicates/info-only.ts`). Same key, same shapes; when
-     * flags republishes with #117 support this entry's provider
-     * moves back. Carve-out idiom: `not: { infoOnly: … }` ALLOWS
-     * info-only invocations.
+     * Provided by `@cad0p/pi-steering-flags` (single source of truth
+     * — re-exported here so this plugin's rules and existing user
+     * configs keep the same key). Carve-out idiom:
+     * `not: { infoOnly: … }` ALLOWS info-only invocations.
      */
     infoOnly: PredicateShape<boolean, InfoOnlyArgs>;
     /**
      * `when.requiresFlagValue` — fires when the LAST-wins value of
      * any listed alias is absent, valueless, or fails `matches`.
-     * VENDORED from `@cad0p/pi-steering-flags` (interim — see
-     * `./predicates/requires-flag-value.ts`). Same key, same
-     * spread-only shape.
+     * Provided by `@cad0p/pi-steering-flags` (single source of truth
+     * — same key, same spread-only shape).
      */
     requiresFlagValue: PredicateShape<RequiresFlagValueArgs>;
   }
@@ -190,12 +188,9 @@ export const githubPlugin = {
   // facade all resolve through this table. Referenced by name
   // (never inlined) so hover rides on the const.
   cliDescriptors: { gh: GH_CLI_DESCRIPTOR },
-  // `infoOnly` + `requiresFlagValue` are vendored from
-  // `@cad0p/pi-steering-flags` (interim — no flags publish works
-  // with core 0.2.0-20260908.x yet; see `./predicates/info-only.ts`).
-  // Same `when` key names, so rules and user configs are untouched;
-  // when flags republishes with #117 support these two entries
-  // delete and the `flagsPlugin` requirement returns.
+  // `infoOnly` + `requiresFlagValue` are re-adopted from
+  // `@cad0p/pi-steering-flags` (single source of truth — same `when`
+  // key names, so rules and user configs are untouched).
   predicates: {
     missingVaultBodyFile,
     foreignRepoTarget,
@@ -207,6 +202,12 @@ export const githubPlugin = {
 
 export default githubPlugin;
 
+export {
+  type InfoOnlyArgs,
+  infoOnly,
+  type RequiresFlagValueArgs,
+  requiresFlagValue,
+} from "@cad0p/pi-steering-flags";
 export {
   GH_ADD_README_FLAG,
   GH_BODY_FILE_FLAG,
@@ -257,7 +258,6 @@ export {
   TITLE_WITH_REF,
 } from "./helpers/patterns.ts";
 export { foreignRepoTarget } from "./predicates/foreign-repo-target.ts";
-export { type InfoOnlyArgs, infoOnly } from "./predicates/info-only.ts";
 export type {
   BodyFileDiagnosis,
   BodyFileSection,
@@ -267,10 +267,6 @@ export {
   diagnose,
   missingVaultBodyFile,
 } from "./predicates/missing-vault-body-file.ts";
-export {
-  type RequiresFlagValueArgs,
-  requiresFlagValue,
-} from "./predicates/requires-flag-value.ts";
 export { ghRepoCreateNeedsSeed } from "./rules/gh-repo-create-needs-seed.ts";
 export { ghRepoFlagBeforeSubcommand } from "./rules/gh-repo-flag-before-subcommand.ts";
 export { issueBodyFromVaultFile } from "./rules/issue-body-from-vault-file.ts";
