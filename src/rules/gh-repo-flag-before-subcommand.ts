@@ -66,7 +66,7 @@
  */
 
 import type { PredicateContext, Rule } from "@cad0p/pi-steering";
-import { GH_CLI_DESCRIPTOR } from "../descriptors.ts";
+import { effectiveRepoTarget } from "../predicates/foreign-repo-target.ts";
 
 export const ghRepoFlagBeforeSubcommand = {
   name: "gh-repo-flag-before-subcommand",
@@ -90,22 +90,19 @@ export const ghRepoFlagBeforeSubcommand = {
   reason: (ctx: PredicateContext) => foreignRepoReason(ctx),
 } as const satisfies Rule;
 
-/** Table-owned gh flag entries, referenced by variable (never re-spelled). */
-const { flags: ghFlags } = GH_CLI_DESCRIPTOR;
-
 /**
  * The dynamic block reason for `gh-repo-flag-before-subcommand`:
- * renders the EFFECTIVE `-R`/`--repo` target via the SAME facade
- * call the predicate's verdict used — single source of truth, so the
- * redirect always names where to cd (LAST-wins across the aliases,
- * glue-aware via the owned descriptor). As-typed flag-echo fidelity
- * is dropped deliberately (#39): a blocked command is never re-run
+ * renders the EFFECTIVE `-R`/`--repo` target via the SAME
+ * `effectiveRepoTarget` call the predicate's verdict used — single source
+ * of truth, so the redirect always names where to cd (LAST-wins across the
+ * aliases, glue-aware, OTHER-consumed values skipped). As-typed flag-echo
+ * fidelity is dropped deliberately (#39): a blocked command is never re-run
  * verbatim; the reader needs WHERE to cd, and an unparsable target
  * renders the honest fallback phrase instead of echoing a flag
- * spelling. Never throws — the facade is total over argv.
+ * spelling. Never throws — the helper is total over argv.
  */
 export function foreignRepoReason(ctx: PredicateContext): string {
-  const target = ctx.command.getFlagValue(ghFlags.repo);
+  const target = effectiveRepoTarget(ctx);
   const via =
     target !== null && target !== ""
       ? `via ${target}`

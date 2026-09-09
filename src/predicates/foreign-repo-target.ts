@@ -66,6 +66,81 @@ import { repoName } from "../helpers/repo-name.ts";
 const { flags: ghFlags } = GH_CLI_DESCRIPTOR;
 
 /**
+ * OTHER consuming spellings (every takesValue:true alias except the repo
+ * pair itself): values following these exact tokens are consumed positions
+ * (same BY-POSITION contract as `positionals()` + `flagPresenceScan`),
+ * so a later `-R`-shaped word there is a VALUE, never a repo flag.
+ *
+ * Local workaround for the known engine limit (flat per-binary table +
+ * non-skipping scalar `getFlagValue`): the facade's `hasFlag` already
+ * skips these positions (so the ABSENT case flips correctly with the
+ * completed tail), but the scalar still reads hijack values as glued `-R`
+ * (the two PRESENT-position flips below need this skip). CORE-ALARM:
+ * per-subcommand arity / value-skipping scalar belongs in core; this
+ * helper goes away when it lands.
+ */
+const OTHER_CONSUMING = new Set<string>(
+  [
+    ...Object.values(GH_CLI_DESCRIPTOR.flags).flatMap((e) =>
+      e.takesValue ? [...e.aliases] : [],
+    ),
+  ].filter((a) => a !== "-R" && a !== "--repo"),
+);
+
+function wordVal(w: { value?: string; text?: string } | undefined): string {
+  if (w === undefined) return "";
+  return w.value ?? w.text ?? "";
+}
+
+/**
+ * Effective `-R`/`--repo` target with OTHER-consumed values skipped
+ * (last-wins across `-R`/`--repo`, attached `=` + glued `-R<rest>`
+ * included, trailing valueless/empty → null). Single source of truth
+ * shared with the block reason — the redirect always names where to cd.
+ */
+export function effectiveRepoTarget(
+  ctx: Parameters<Parameters<typeof definePredicate>[0]>[1],
+): string | null {
+  const args = (ctx.input?.args ?? []) as readonly {
+    value?: string;
+    text?: string;
+  }[];
+  const consumed = new Set<number>();
+  for (let i = 0; i < args.length; i++) {
+    const tok = wordVal(args[i]);
+    if (tok === "--") {
+      for (let j = i + 1; j < args.length; j++) consumed.add(j);
+      break;
+    }
+    if (OTHER_CONSUMING.has(tok)) {
+      if (i + 1 < args.length) consumed.add(i + 1);
+      i += 1;
+    }
+  }
+  const flagSet = ["-R", "--repo"];
+  for (let i = args.length - 1; i >= 0; i--) {
+    if (consumed.has(i)) continue;
+    const t = wordVal(args[i]);
+    for (const alias of flagSet) {
+      if (t === alias) {
+        const nxt = args[i + 1];
+        if (nxt === undefined || consumed.has(i + 1)) return null;
+        const v = wordVal(nxt);
+        return v === "" ? null : v;
+      }
+    }
+    for (const alias of flagSet) {
+      const prefix = `${alias}=`;
+      if (t.startsWith(prefix)) return t.slice(prefix.length);
+    }
+    if (t.length > 2 && t[0] === "-" && t[1] !== "-") {
+      if (t[1] === "R") return t.slice(2);
+    }
+  }
+  return null;
+}
+
+/**
  * `foreignRepoTarget` — true (BLOCK) when the effective `-R`/`--repo`
  * target is a foreign repository; false releases repo-flag-ABSENT,
  * slashless, and fork→upstream commands. Fail-closed: unparsable
@@ -86,10 +161,11 @@ export const foreignRepoTarget = definePredicate<BooleanLeafArgs>(
     if (!ctx.command.hasFlag(ghFlags.repo)) return false;
 
     // Step 2 — the effective target (last-wins across the aliases,
-    // glue-aware via the owned descriptor). A trailing valueless
-    // alias or an empty attached value as the last occurrence wins
-    // and fail-closes (null / "" → block below).
-    const target = ctx.command.getFlagValue(ghFlags.repo);
+    // glue-aware via the owned descriptor, OTHER-consumed values skipped
+    // via `effectiveRepoTarget` — see its engine-limit note). A trailing
+    // valueless alias or an empty attached value as the last occurrence
+    // wins and fail-closes (null / "" → block below).
+    const target = effectiveRepoTarget(ctx);
     // Step 3 — fail-closed on an unparsable target.
     if (target === null || target === "") return true;
     // Step 4 — slashless remote-name forms (`-R upstream`) are the

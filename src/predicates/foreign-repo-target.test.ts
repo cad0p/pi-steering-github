@@ -262,33 +262,35 @@ describe("github plugin — foreignRepoTarget (basename match / fail-closed)", (
     assert.equal(await foreignRepoTarget(true, ctx), true);
   });
 
-  it("accepted limitation: slashless lookalike value word releases via step 4", async () => {
-    // Table-derived glue for `R` decomposes ANY `-R<rest>` word at any
-    // position: a quoted body value `-m "-Rebased onto main"` (ONE
-    // walker word) hijacks resolution to the slashless target
-    // "ebased onto main" → step-4 RELEASE — so a body word can never
-    // cause a false block. (It can MASK a real foreign target behind
-    // it — heuristic discipline, same class as the fork→upstream
-    // tolerance.)
+  it("BEHAVIOR DELTA (consumption completeness): slashless -m value no longer masks (was release)", async () => {
+    // FLIP from the old "accepted limitation" release pin: `-m/--milestone`
+    // is now tabled takesValue:true (`gh help pr edit` shows
+    // `-m, --milestone name`), so the quoted milestone value
+    // `"-Rebased onto main"` is CONSUMED as `-m`'s value and hidden from
+    // `-R` resolution — the leading foreign `-Rcad0p/other` wins → FIRE.
+    // The old release was the hijack hole (a slashless body word masking a
+    // foreign target behind step-4 release); consumption completeness closes
+    // it. Fail-closed direction, pinned so it cannot regress silently.
     const ctx = ctxWith('gh -Rcad0p/other pr edit 46 -m "-Rebased onto main"', {
       remote: "https://github.com/cad0p/pi-steering-github.git",
     });
-    assert.equal(await foreignRepoTarget(true, ctx), false);
+    assert.equal(await foreignRepoTarget(true, ctx), true);
   });
 
-  it("accepted limitation: slashful lookalike value word over-blocks", async () => {
-    // The dangerous twin of the pin above: a SLASHFUL body value
-    // (`-m "-Rfoo/bar ref"`, ONE walker word) hijacks resolution to
-    // `foo/bar ref` → basename mismatch → FIRE despite the leading
-    // own-repo target. Fail-closed direction, accepted under the
-    // table-glue contract.
+  it("BEHAVIOR DELTA (consumption completeness): slashful -m value no longer over-blocks (was fire)", async () => {
+    // FLIP from the old over-block pin: with `-m` consuming, the quoted
+    // `"-Rfoo/bar ref"` is `-m`'s milestone VALUE (hidden), not an `-R`
+    // target — resolution sees only the leading own-repo target → basename
+    // match → RELEASE. The old fire was the hijack hole's fail-closed twin
+    // (a slashful body word hijacking resolution); hiding is the correct,
+    // `--help`-faithful verdict. Pinned so the flip cannot change silently.
     const ctx = ctxWith(
       'gh -Rcad0p/pi-steering-github pr edit 46 -m "-Rfoo/bar ref"',
       {
         remote: "https://github.com/cad0p/pi-steering-github.git",
       },
     );
-    assert.equal(await foreignRepoTarget(true, ctx), true);
+    assert.equal(await foreignRepoTarget(true, ctx), false);
   });
 
   it("BEHAVIOR DELTA (#36 delta 1): bare --version leaves the handler indifferent", async () => {
@@ -387,16 +389,17 @@ describe("github plugin — foreignRepoTarget (basename match / fail-closed)", (
     assert.equal(await foreignRepoTarget(true, ctx), true);
   });
 
-  it("accepted limitation: -R-shaped VALUE word glues and over-blocks (subcommand-first)", async () => {
-    // `gh -v pr merge -m "-Rfoo/bar ref"` (ONE walker word): ANY
-    // `-R`-shaped word makes the gate PRESENT, and table-derived glue
-    // resolves the slashful `foo/bar ref` → basename mismatch → fire.
-    // Same accepted over-block class, newly reachable from
-    // subcommand-first shapes.
+  it("BEHAVIOR DELTA (consumption completeness): -R-shaped -m VALUE no longer fires (was over-block)", async () => {
+    // FLIP from the old subcommand-first over-block pin: `gh -v pr merge
+    // -m "-Rfoo/bar ref"` carries NO `-R/--repo` flag — the `-Rfoo/bar ref`
+    // word is `-m`'s consumed VALUE now (`-m/--milestone` takesValue:true;
+    // `-m/--merge` bool collision resolved value-side, see descriptor
+    // ALARMS), so the gate is ABSENT → release. The old fire read a VALUE
+    // word as a flag (hijack-leaning); hiding is `--help`-faithful.
     const ctx = ctxWith('gh -v pr merge -m "-Rfoo/bar ref"', {
       remote: "https://github.com/cad0p/pi-steering-github.git",
     });
-    assert.equal(await foreignRepoTarget(true, ctx), true);
+    assert.equal(await foreignRepoTarget(true, ctx), false);
   });
 
   it("BEHAVIOR DELTA (#39): non-repo leading flag + later real --repo now blocks", async () => {

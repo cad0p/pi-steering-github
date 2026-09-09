@@ -466,20 +466,19 @@ describe("github plugin — gh-repo-flag-before-subcommand ReasonFn (dynamic)", 
     );
   });
 
-  it("a lookalike VALUE word renders exactly what the over-block keyed on", () => {
-    // Single source of truth cuts both ways: a slashful `-R`-shaped
-    // value (`-m "-Rfoo/bar ref"`, ONE walker word) hijacks resolution
-    // (accepted table-glue class) AND the redirect — the reason names
-    // the full glued value, i.e. precisely the target the fail-closed
-    // block resolved. Display can no longer diverge from the verdict:
-    // both read the same call. (A slashless lookalike releases
-    // upstream and is never rendered at all.)
+  it("BEHAVIOR DELTA (consumption completeness): lookalike -m VALUE renders the leading target, not the hijack", () => {
+    // FLIP from the old hijack-render pin: with `-m` consuming, the
+    // `"-Rfoo/bar ref"` word is `-m`'s VALUE (hidden) — `effectiveRepoTarget`
+    // resolves the leading own-repo target, and the reason names it (single
+    // source of truth with the verdict). In the real gate this command
+    // RELEASES (own-repo match), so the reason never surfaces; the direct
+    // call here pins that display can no longer diverge into hijack text.
     const reason = foreignRepoReason(
       ctxWith('gh -Rcad0p/pi-steering-github pr edit 46 -m "-Rfoo/bar ref"'),
     );
     assert.equal(
       reason,
-      "The PR you're targeting via foo/bar ref belongs to a foreign repo.\n" +
+      "The PR you're targeting via cad0p/pi-steering-github belongs to a foreign repo.\n" +
         requirementTail,
     );
   });
