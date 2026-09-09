@@ -329,6 +329,41 @@ describe("github plugin — PR rules (issue-link + vault body-file policy)", () 
     assert.equal(block, false, `expected allow, got block by ${rule}`);
   });
 
+  it("#44: label/title edits pass without the substitution (no body write)", async () => {
+    // The pi#8845 live over-block: `gh issue edit 8845 --add-label
+    // bug` only touches labels — the vault-body policy applies to an
+    // edit solely when a body-affecting flag is present.
+    for (const cmd of [
+      "gh issue edit 8845 --add-label bug",
+      'gh pr edit 46 --title "feat: x (closes #12)"',
+    ]) {
+      const { block, rule } = await evaluateBash(makeFixtureDir(), cmd, host);
+      assert.equal(
+        block,
+        false,
+        `expected allow for: ${cmd} (block by ${rule})`,
+      );
+    }
+  });
+
+  it("#44: body-carrying edits stay gated (inline --body / direct path)", async () => {
+    const inline = await evaluateBash(
+      makeFixtureDir(),
+      `gh issue edit 29 --body "plain text"`,
+      host,
+    );
+    assert.equal(inline.block, true, "expected block");
+    assert.equal(inline.rule, "issue-body-from-vault-file");
+    const fx = makeVaultRepoFixture(repo);
+    const direct = await evaluateBash(
+      makeFixtureDir(),
+      `gh pr edit 46 --body-file "${fx.prBodyFile}"`,
+      host,
+    );
+    assert.equal(direct.block, true, "expected block");
+    assert.equal(direct.rule, "pr-body-from-vault-file");
+  });
+
   it("allows the glued --body-file=<(…) form (walker-split into two words)", async () => {
     const fx = makeVaultRepoFixture(repo);
     const { block, rule } = await evaluateBash(

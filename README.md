@@ -4,11 +4,11 @@ GitHub workflow rules for [pi-steering](https://github.com/cad0p/pi-steering): e
 
 ## What it ships
 
-One `Plugin` (`name: "github"`) with six rules and two predicates:
+One `Plugin` (`name: "github"`) with six rules and four predicates. Every rule routes on `command: "gh"` plus `when.subcommand` sequences (structural — core #117 command-first, no regex anchors); the plugin owns the `gh` CLI descriptor (`Plugin.cliDescriptors`) that backs subcommand extraction, the `flag:` leaf, and the bound `ctx.command` facade:
 
 | Rule | Fires on | Blocks when |
 | --- | --- | --- |
-| `gh-repo-flag-before-subcommand` | gated `pr create \| new \| edit \| merge \| issue create \| edit` invocations carrying `-R/--repo` — in any leading flag(+value) pair (#41) or anywhere on the subcommand line | the `-R`/`--repo` target is a FOREIGN repo (basename differs from the cwd repo) — redirect: run a foreign subagent maintainer loop until good, then cd into the foreign repo and target it from there |
+| `gh-repo-flag-before-subcommand` | gated `pr create \| new \| edit \| merge \| issue create \| edit` invocations carrying `-R/--repo` — in any flag position (leading or subcommand-line) | the `-R`/`--repo` target is a FOREIGN repo (basename differs from the cwd repo) — redirect: run a foreign subagent maintainer loop until good, then cd into the foreign repo and target it from there |
 | `pr-body-from-vault-file` | `gh pr create \| new \| edit` | the body doesn't come from `--body-file <(perl -0777 -pe '<BODY_STRIP>' <file>)` — a process substitution running the pinned perl one-liner (direct paths and inline `--body` are blocked) |
 | `pr-create-needs-issue-link` | `gh pr create \| new` | the `--title` value or the body lacks a closing keyword + `#N` |
 | `pr-merge-needs-closing-keywords` | `gh pr merge` | the `--subject` value lacks a closing keyword + `#N` |
@@ -17,8 +17,10 @@ One `Plugin` (`name: "github"`) with six rules and two predicates:
 
 | Predicate | Purpose |
 | --- | --- |
-| `missingVaultBodyFile` | true when `--body-file` is absent, not the pinned `<(perl -0777 -pe '<BODY_STRIP>' <file>)` substitution form, or the path fails the vault check (nonexistent, outside a napkin vault, not under `<repo>/<section>/`) |
+| `missingVaultBodyFile` | true when `--body-file` is absent, not the pinned `<(perl -0777 -pe '<BODY_STRIP>' <file>)` substitution form, or the path fails the vault check (nonexistent, outside a napkin vault, not under `<repo>/<section>/`) — except an `edit` carrying no body-affecting flag (`--body`/`-b`, `--body-file`/`-F`), which passes (#44) |
 | `foreignRepoTarget` | three states over the invocation's `-R/--repo`: ABSENT → released (falls through to the per-subcommand rules); PRESENT-unparsable → fail-closed; PRESENT-parsable → true when the effective target's basename differs from the cwd repo's basename (foreign). Fail-closed on unknown cwd / unresolvable repo too |
+| `infoOnly` | true when the command IS an info-only invocation (`--help` / `--version` + additive `extraFlags`) — vendored from `@cad0p/pi-steering-flags` (interim, see [Usage](#usage)) |
+| `requiresFlagValue` | true when the last-wins value of a flag alias set is absent, valueless, or fails `matches` — vendored from `@cad0p/pi-steering-flags` (interim, see [Usage](#usage)) |
 
 All rules are **strict** — no `noOverride: false`, so there is no agent-side override escape hatch. The policy is unconditional.
 
@@ -28,9 +30,11 @@ The package mirrors the canonical `examples/work-item-plugin` layout — one fil
 
 ```
 src/
-├── index.ts                        # plugin assembly + roster + declare global + re-exports
+├── index.ts                        # plugin assembly + roster + cliDescriptors + declare global + re-exports
 ├── index.test.ts                   # roster-order pin + reason-string byte-identity pins
 ├── integration.test.ts             # end-to-end pipeline tests
+├── descriptors.ts                  # the owned gh CLI descriptor (GH_CLI_DESCRIPTOR + entry consts)
+├── descriptors.test.ts             # descriptor value pin (#61 acceptance)
 ├── helpers/
 │   ├── body-strip.ts                # the pinned perl body-strip one-liner (leaf)
 │   ├── body-strip.test.ts           # perl behavior pins (fixture matrix)
@@ -38,14 +42,16 @@ src/
 │   ├── pattern-args.test.ts
 │   ├── body-keyword.ts             # bodyHasClosingKeyword
 │   ├── body-keyword.test.ts
-│   ├── patterns.ts                 # the rule pattern constants (shared by the rules)
-│   ├── patterns.test.ts            # pattern-contract + command-anchor pins
+│   ├── patterns.ts                 # the keyword content-pattern constants (routing is structural now)
+│   ├── patterns.test.ts            # content-pattern pins
 │   └── repo-name.ts                # repoName
 ├── predicates/
 │   ├── missing-vault-body-file.ts  # the vault body-file predicate handler
 │   ├── missing-vault-body-file.test.ts
 │   ├── foreign-repo-target.ts      # the -R foreign-target gate handler
-│   └── foreign-repo-target.test.ts
+│   ├── foreign-repo-target.test.ts
+│   ├── info-only.ts                # when.infoOnly — vendored from pi-steering-flags (interim)
+│   └── requires-flag-value.ts      # when.requiresFlagValue — vendored from pi-steering-flags (interim)
 └── rules/
     ├── gh-repo-flag-before-subcommand.ts + .test.ts
     ├── pr-body-from-vault-file.ts
@@ -68,18 +74,22 @@ pnpm add @cad0p/pi-steering-github
 ```ts
 // .pi/steering/index.ts
 import { defineConfig } from "@cad0p/pi-steering";
-import { flagsPlugin } from "@cad0p/pi-steering-flags";
 import githubPlugin from "@cad0p/pi-steering-github";
 
 export default defineConfig({
-  // REQUIRED: two rules compose pi-steering-flags predicates
-  // declaratively — `pr-merge-needs-closing-keywords` (`not.infoOnly`
-  // + `requiresFlagValue`) and `gh-repo-flag-before-subcommand`
-  // (`not.infoOnly`) — without flagsPlugin those keys throw
-  // UnknownPredicateError at evaluation time.
-  plugins: [flagsPlugin, githubPlugin],
+  plugins: [githubPlugin],
 });
 ```
+
+The `infoOnly` + `requiresFlagValue` leaves the rules compose are
+vendored INTO this plugin (same `when` key names, same shapes) — no
+`flagsPlugin` needed. Interim: no `@cad0p/pi-steering-flags` publish
+works with core `0.2.0-20260908.x` yet (its 0.1.1 line imports core
+root helpers deleted by the #117 command-first breakage). When flags
+republishes with #117 support the vendored copies delete and the
+`flagsPlugin` requirement returns — rule `when`-clauses and user
+configs are untouched either way (the keys don't change, only the
+provider).
 
 Listing the plugins feeds their rule/predicate names into `defineConfig`'s type unions, so `disabledRules` typos fail at compile time.
 
@@ -87,12 +97,12 @@ Listing the plugins feeds their rule/predicate names into `defineConfig`'s type 
 
 ### `gh-repo-flag-before-subcommand`
 
-`gh -R x/y pr create|new|edit|merge`, `gh pr merge --repo=cad0p/x …`, and every other gated `pr|issue …` mutation that **carries** `-R/--repo` targeting a foreign repo is blocked with a redirect: run a foreign subagent maintainer loop until good, then cd into the foreign repo and target it from there. This is the ENTRY step of the foreign flow — the rule sits FIRST in the roster so the redirect is the first thing the agent meets. Its router anchor now OVERLAPS the other rules' `^gh\s+(?:pr|issue)` anchors (it routes gated subcommands with any number of leading flag(+value) pairs — both `-R` positions since #39, unbounded count since #41), so correctness rests on the evaluator's first-firing-rule-wins ordering plus RELEASE FALL-THROUGH: the `foreignRepoTarget` predicate releases every command without a foreign target and the per-subcommand rules evaluate normally.
+`gh -R x/y pr create|new|edit|merge`, `gh pr merge --repo=cad0p/x …`, and every other gated `pr|issue …` mutation that **carries** `-R/--repo` targeting a foreign repo is blocked with a redirect: run a foreign subagent maintainer loop until good, then cd into the foreign repo and target it from there. This is the ENTRY step of the foreign flow — the rule sits FIRST in the roster so the redirect is the first thing the agent meets. Its `subcommand:` set OVERLAPS the other rules' sequences (it routes gated subcommands in any flag position — both `-R` positions since #39, unbounded leading pairs since #41, now structural via the descriptor's consuming-flag arity instead of regex), so correctness rests on the evaluator's first-firing-rule-wins ordering plus RELEASE FALL-THROUGH: the `foreignRepoTarget` predicate releases every command without a foreign target and the per-subcommand rules evaluate normally.
 
-The gate keys on `-R/--repo` **PRESENCE, not position**: covered are `-R x/y`, `--repo x/y`, `--repo=x/y`, `-Rx/y` in ANY of the leading flag(+value) pairs (#41 lifted the one-pair cap — `gh --hostname h -R x/y pr merge` routes) OR anywhere on the gated subcommand line. A command carrying NO `-R/--repo` anywhere is released untouched — and since #41 the four per-subcommand anchors match flag-first forms too, so a released command LANDS on its vault-body/keyword policy instead of bypassing the stack (pre-#41 a released one-pair form escaped every policy). Non-repo leading flags (`-v`, `--hostname`) route but release on absence — landing on those same policies; note that a real repo flag after them now blocks at the gate (`-v … --repo=<foreign>` escaped the gate before #39). The anchor's value arm ignores a bare-dash value token (`gh -F - pr create` stays unrouted) — the accepted cost of its linear-time, ReDoS-proof guard, and it bites at ANY pair boundary: one lone `-` between pairs unrouts the whole tail (`gh -R x/y - pr merge` escapes both the foreign gate and the subcommand policies). Harmless in practice — `-` alone is not a valid gh flag, so nothing real executes. The gate is **fully declarative** — zero condition code, an AND of two registered-predicate leaves:
+The gate keys on `-R/--repo` **PRESENCE, not position**: covered are `-R x/y`, `--repo x/y`, `--repo=x/y`, `-Rx/y` in ANY flag position (`gh --hostname h -R x/y pr merge` routes — the descriptor's consuming-flag arity keeps extraction exact) OR anywhere on the gated subcommand line. A command carrying NO `-R/--repo` anywhere is released untouched — and the per-subcommand sequences match flag-first forms too, so a released command LANDS on its vault-body/keyword policy instead of bypassing the stack (pre-#41 a released one-pair form escaped every policy). Non-repo leading flags (`-v`, `--hostname`) route but release on absence — landing on those same policies; note that a real repo flag after them blocks at the gate (`-v … --repo=<foreign>` escaped the gate before #39). The gate is **fully declarative** — zero condition code, a `subcommand:` router plus an AND of two registered-predicate leaves:
 
-- `foreignRepoTarget: true` — this package's registered predicate: blocks when the EFFECTIVE `-R`/`--repo` target is a foreign repo.
-- `not.infoOnly({ extraFlags: ["-h"] })` — the read-only carve-out, below.
+- `foreignRepoTarget: true` — this package's registered predicate: blocks when the EFFECTIVE `-R`/`--repo` target is a foreign repo (reads through the bound `ctx.command` facade; glue for `R` derives from the owned descriptor — no call-site arity).
+- `not.infoOnly({ extraFlags: ["-h"] })` — the read-only carve-out, below (vendored leaf, same key).
 
 Target resolution is **last-wins across the `-R`/`--repo` aliases**, matching gh/cobra (repeated spellings of one logical flag collapse to their final value): when both aliases occur, the LAST occurrence is the effective target, and a trailing valueless alias or an empty attached value as the last occurrence fails closed instead of falling back to the overridden earlier alias. The reason renders the EFFECTIVE target from the same resolution call the verdict used — `via cad0p/x` — so the redirect names where to cd; an unparsable target renders the honest fallback phrase instead of echoing a flag spelling:
 
@@ -104,8 +114,8 @@ then cd into the foreign repo and target it from there.
 
 - **Fork→upstream flow is allowed**: when the `-R` target's basename equals the cwd repo's basename (origin URL basename, cwd-folder fallback — the existing `repoName` helper), the command passes — `gh -R upstream/foo pr create` from inside the `me/foo` clone is the most common legit `-R` use. This basename equality IS the policy (#19), hardcoded in the predicate — no config knob. Cost accepted: `-R <own-repo> pr merge` from inside the repo is indistinguishable and slips through — these gates are heuristic discipline, not security. For fork workflows, `gh repo set-default upstream` makes gh target upstream by default (no `-R` needed).
 - **Fail-closed**: unknown cwd / unresolvable repo / unparsable target / a valueless-or-empty last alias occurrence → blocked.
-- **Read-only `--help`/`-h` never blocks** — declaratively, via the `not.infoOnly({ extraFlags: ["-h"] })` leaf: the flags plugin's `--help`/`--version` defaults PLUS GitHub's additive `-h`. Accepted exposure: a gated invocation carrying `--version` (bare or attached, e.g. `gh -R owner/x pr create --version`) is now ALLOWED too — gh errors on it for pr/issue subcommands, so nothing real can happen; `-v` is deliberately NOT in the info-only set and stays gated. Both leaves are token-level over walker argv (a help token inside a quoted value can't falsely exempt); the pattern itself is a shape router, no regex flag parsing.
-- **Glued short form `-Rcad0p/x`**: resolved glue-aware via the `{ gluedShorts: ["R"] }` opt-in (`@cad0p/pi-steering-flags@0.1.1-20260824.0`, upstream cad0p/pi-steering-flags#11) — own-repo basename matches are ALLOWED, foreign owner/repo targets block on basename mismatch. Accepted limitation: any word shaped `-R<rest>` decomposes once `R` is declared, so an `-R`-prefixed VALUE (e.g. a body value `-Rfoo/bar ref`) can hijack resolution → fail-closed over-block; slashless lookalikes (`"-Rebased onto main"`) release.
+- **Read-only `--help`/`-h` never blocks** — declaratively, via the `not.infoOnly({ extraFlags: ["-h"] })` leaf: `--help`/`--version` defaults PLUS GitHub's additive `-h`. Accepted exposure: a gated invocation carrying `--version` (bare or attached, e.g. `gh -R owner/x pr create --version`) is now ALLOWED too — gh errors on it for pr/issue subcommands, so nothing real can happen; `-v` is deliberately NOT in the info-only set and stays gated. Both leaves are token-level over walker argv (a help token inside a quoted value can't falsely exempt).
+- **Glued short form `-Rcad0p/x`**: resolved via table-derived glue (`R` is a consuming short in the owned descriptor) — own-repo basename matches are ALLOWED, foreign owner/repo targets block on basename mismatch. Accepted limitation: any word shaped `-R<rest>` decomposes, so an `-R`-prefixed VALUE (e.g. a body value `-Rfoo/bar ref`) can hijack resolution → fail-closed over-block; slashless lookalikes (`"-Rebased onto main"`) release.
 - **`repo create|new` is excluded by design**: nothing to cd into — the target is the positional argument (`gh repo create owner/name` works from any cwd, and the seed rule gates the actual create form).
 - **Slashless values** (`-R upstream`, a remote-name form) route but are **released** by `foreignRepoTarget` (no `/` → not a foreign owner/repo redirect; the fork→upstream flow passes through unchanged).
 
@@ -113,7 +123,9 @@ then cd into the foreign repo and target it from there.
 
 `gh pr create|new|edit` must take the body from `--body-file <(perl -0777 -pe '<BODY_STRIP>' <file>)` — a process substitution running the pinned perl one-liner, which strips the note's YAML frontmatter before `gh` uploads it. Direct paths upload the file **verbatim** (frontmatter renders on GitHub) and are blocked, like inline `--body`.
 
-FORM + vault-path check — the substitution must be the pinned form AND the file argument must resolve to a real file inside a napkin vault, under a `<repo>/<section>/` directory (`<repo>` = origin URL basename, cwd-folder fallback). Fail-closed: anything unverifiable (missing flag, unparsable form, walker-unknown cwd, nonexistent path, outside a vault, wrong section/repo) counts as missing. The `<repo>/<section>/` convention is both taught by the rule's reason and enforced here. The closing-keyword content check belongs to `pr-create-needs-issue-link` (responsibility separation). Why vault body files: they are reviewable, persistent, and kb-discoverable — the body is written and reviewed *before* the command runs, so the PR description is a deliberate artifact rather than an inline afterthought. Since #41 the anchor covers ANY number of leading flag(+value) pairs (`gh --hostname h pr create …` routes), so a command released by the foreign gate lands here instead of bypassing the policy.
+FORM + vault-path check — the substitution must be the pinned form AND the file argument must resolve to a real file inside a napkin vault, under a `<repo>/<section>/` directory (`<repo>` = origin URL basename, cwd-folder fallback). Fail-closed: anything unverifiable (missing flag, unparsable form, walker-unknown cwd, nonexistent path, outside a vault, wrong section/repo) counts as missing. The `<repo>/<section>/` convention is both taught by the rule's reason and enforced here. The closing-keyword content check belongs to `pr-create-needs-issue-link` (responsibility separation). Why vault body files: they are reviewable, persistent, and kb-discoverable — the body is written and reviewed *before* the command runs, so the PR description is a deliberate artifact rather than an inline afterthought. Flag-first forms (`gh --hostname h pr create …`) route structurally, so a command released by the foreign gate lands here instead of bypassing the policy.
+
+Edit scoping (#44): a `pr edit` carrying no body-affecting flag (`--body`/`-b`, `--body-file`/`-F`) skips this rule — `gh pr edit 46 --title "…"` and label/state edits pass without the substitution. Only edits that WRITE the body are gated (inline `--body` stays blocked — bodies must come from the vault).
 
 Since #43 a deviating inner command carries a byte-diff diagnostic: a mutated strip program reports the divergent core spans with the byte offset (`substitution program diverges from the pinned strip at byte 129: - expected: *)? / + got: ?)*`), anything else (`cat`, `sed`, extra/missing tokens) shows the two full command lines — always followed by the canonical recipe, so the block message stays actionable.
 
@@ -126,15 +138,17 @@ Since #43 a deviating inner command carries a byte-diff diagnostic: a mutated st
 - **Multiple issues** — repeat the keyword per issue (`"Closes #A, closes #B"`); `"Closes #A #B"` honors only the first number. A bare `#N` mention never counts; colons and case variants are accepted.
 - Draft PRs are gated like any other PR (a tracking issue is the allowed pattern while a draft is open).
 
-Since #41 the anchor covers ANY number of leading flag(+value) pairs (`gh -v -R x/y pr create --title t` routes), so gate-released flag-first creates get the full issue-link policy.
+Flag-first creates (`gh -v -R x/y pr create --title t`) route structurally, so gate-released creates get the full issue-link policy. The `--title` read is last-wins across the `--title`/`-t` aliases, matching gh/cobra.
 
 ### `pr-merge-needs-closing-keywords`
 
-`gh pr merge` must carry a closing keyword + `#N` in the `--subject` value (commit subject) — short `-t` form, `--flag=value` forms. GitHub scans the whole squash commit message for closing keywords, so the commit subject alone closes the issues; the commit body is optional at merge. Since #41 the anchor covers ANY number of leading flag(+value) pairs (`gh -v --hostname h pr merge --squash` routes and still blocks without a keyword), so gate-released flag-first merges land on this policy. The gate is **fully declarative** — zero condition code: `when.not.infoOnly(["-h"])` exempts read-only `--help`, `--version`, and GitHub's additive `-h` (attached forms `--help=value`, `--version=1`, `-h=value` included; `-v` stays gated), and `when.requiresFlagValue({ flags: ["--subject", "-t"], matches: ISSUE_REF })` enforces the subject check with gh/cobra last-flag-wins semantics across the two aliases — absent, valueless, or non-matching values block. Both leaves are `@cad0p/pi-steering-flags` predicates over walker-parsed argv, so quoted values such as `--subject "see --help"` can't falsely exempt. An exact quoted value equal to an info token (for example `--subject "--help"`) is indistinguishable from a bare flag after quote removal and is an accepted limitation.
+`gh pr merge` must carry a closing keyword + `#N` in the `--subject` value (commit subject) — short `-t` form, `--flag=value` forms. GitHub scans the whole squash commit message for closing keywords, so the commit subject alone closes the issues; the commit body is optional at merge. Flag-first merges (`gh -v --hostname h pr merge --squash`) route structurally and still block without a keyword, so gate-released merges land on this policy. The gate is **fully declarative** — zero condition code: `when.not.infoOnly(["-h"])` exempts read-only `--help`, `--version`, and GitHub's additive `-h` (attached forms `--help=value`, `--version=1`, `-h=value` included; `-v` stays gated), and `when.requiresFlagValue({ flags: ["--subject", "-t"], matches: ISSUE_REF })` enforces the subject check with gh/cobra last-flag-wins semantics across the two aliases — absent, valueless, or non-matching values block. Both leaves are this package's vendored predicates (same keys as `@cad0p/pi-steering-flags`, interim — see [Usage](#usage)) over walker-parsed argv, so quoted values such as `--subject "see --help"` can't falsely exempt. An exact quoted value equal to an info token (for example `--subject "--help"`) is indistinguishable from a bare flag after quote removal and is an accepted limitation.
 
 ### `issue-body-from-vault-file`
 
-`gh issue create|edit` must take the body from the same pinned perl substitution form (`--body-file <(perl -0777 -pe '<BODY_STRIP>' <file>)`). No keyword requirement — issues close nothing. Since #41 the anchor covers ANY number of leading flag(+value) pairs, so gate-released flag-first invocations land here. Shares the pr rule's dynamic byte-diff block reason (same `explainBodyFileArg` tag + `renderBodyFileDiff` helper — the two rules' diagnostics can never drift).
+`gh issue create|edit` must take the body from the same pinned perl substitution form (`--body-file <(perl -0777 -pe '<BODY_STRIP>' <file>)`). No keyword requirement — issues close nothing. Flag-first invocations route structurally, so gate-released forms land here. Shares the pr rule's dynamic byte-diff block reason (same `explainBodyFileArg` tag + `renderBodyFileDiff` helper — the two rules' diagnostics can never drift).
+
+Edit scoping (#44): an `issue edit` carrying no body-affecting flag skips this rule — `gh issue edit 8845 --add-label bug` (the live over-block that motivated the fix) passes without the substitution.
 
 ### The pinned frontmatter-strip one-liner
 
@@ -170,17 +184,21 @@ gh repo create cad0p/<name> --add-readme
 
 The seed commit is the PR's base — the PR diff replaces it, so the first content is reviewed.
 
-Non-seed flags (`--source`, `--push`, `--clone`, `--description`, `--public|--private`, `--remote`, `--team`, …) do **not** exempt: `gh repo create x --source . --push` is blocked too — only a seed flag lets the command through. The rule is a form check (like the body-file rules); gh's own flag validation governs seed/`--source` combos at runtime. Since #41 the anchor covers ANY number of leading flag(+value) pairs (`gh -v --hostname h repo create foo` is gated; `gh -g repo create foo` passes — seed flags count anywhere in the command), closing the flag-first bare-create escape.
+Non-seed flags (`--source`, `--push`, `--clone`, `--description`, `--public|--private`, `--remote`, `--team`, …) do **not** exempt: `gh repo create x --source . --push` is blocked too — only a seed flag lets the command through. The rule is a form check (like the body-file rules); gh's own flag validation governs seed/`--source` combos at runtime. Routing is structural (`gh -v --hostname h repo create foo` is gated; `gh -g repo create foo` passes — seed flags count anywhere in the command), and the exemption is the declarative `not.flag` leaf over the descriptor's seed entries — token-level and quote-aware, which fixes the old accepted false-exemption: a seed-looking token inside a QUOTED value (`--description "see --license mit"`) no longer exempts. Glued lookalikes without a leading dash (`foo--add-readme`) still never match; `-local` / `-public` now read as `-l` / `-p` via pflag-faithful table glue (gh rejects both lines at runtime on the junk seed values, so nothing real executes — accepted, pinned by the tests).
 
 ## Predicates
 
 ### `missingVaultBodyFile`
 
-`when.missingVaultBodyFile` takes `{ section: "prs" | "issues" }` and returns `true` (rule blocks) when the command's `--body-file` value is missing, not the pinned `<(perl -0777 -pe '<BODY_STRIP>' <path>)` substitution form (direct paths, inline `--body`, wrong inner commands, extra or missing tokens), or the path fails the vault check: it must resolve to a real file inside a napkin vault (`.napkin/` / `.obsidian/.napkin/` walk-up), under a `<repo>/<section>/` directory (`<repo>` = origin URL basename, cwd-folder fallback). Fail-closed: anything unverifiable (incl. walker-unknown cwd) counts as missing. The `section` argument selects the required `<repo>/<section>/` directory — the convention is taught by the rule reasons AND enforced here.
+`when.missingVaultBodyFile` takes `{ section: "prs" | "issues" }` and returns `true` (rule blocks) when the command's `--body-file` value is missing, not the pinned `<(perl -0777 -pe '<BODY_STRIP>' <path>)` substitution form (direct paths, inline `--body`, wrong inner commands, extra or missing tokens), or the path fails the vault check: it must resolve to a real file inside a napkin vault (`.napkin/` / `.obsidian/.napkin/` walk-up), under a `<repo>/<section>/` directory (`<repo>` = origin URL basename, cwd-folder fallback). Fail-closed: anything unverifiable (incl. walker-unknown cwd) counts as missing. Edit scoping (#44): an `edit` with no body-affecting flag (`--body`/`-b`, `--body-file`/`-F`) returns `false` — the policy applies to an edit only when the command writes the body. The `section` argument selects the required `<repo>/<section>/` directory — the convention is taught by the rule reasons AND enforced here.
 
 ### `foreignRepoTarget`
 
-`when.foreignRepoTarget` is boolean-bare (`true` to enable, `false` never fires; bare `true` ≡ spread `{}`) and takes no arguments on purpose — the basename policy IS the semantics (#19), there is no `matchBy`/`flags` knob. It collapses every routed command into one of three states: ABSENT (`hasFlag` sees no `-R`/`--repo` anywhere — space, attached, or glued forms) → release (fall-through to the per-subcommand rules); PRESENT-unparsable (valueless or empty-valued LAST alias occurrence) → fail-closed block; PRESENT-parsable → slashless remote-name release, then basename compare against the cwd repo. Fail-closed rails remain: walker-unknown cwd, unresolvable repo.
+`when.foreignRepoTarget` is a boolean leaf (core `BooleanLeafArgs`: `true` / `{ value: true }` enable the gate, `false` never fires — deliberately not inverted) and takes no arguments on purpose — the basename policy IS the semantics (#19), there is no `matchBy`/`flags` knob. Flag access reads through the bound `ctx.command` facade (glue + consumption from the owned gh descriptor). It collapses every routed command into one of three states: ABSENT (no `-R`/`--repo` anywhere — space, attached, or glued forms) → release (fall-through to the per-subcommand rules); PRESENT-unparsable (valueless or empty-valued LAST alias occurrence) → fail-closed block; PRESENT-parsable → slashless remote-name release, then basename compare against the cwd repo. Fail-closed rails remain: walker-unknown cwd, unresolvable repo.
+
+### `infoOnly` / `requiresFlagValue` (vendored, interim)
+
+Same `when` key names and arg shapes as `@cad0p/pi-steering-flags` (`infoOnly: true | { extraFlags }`, `requiresFlagValue: { flags, matches }`), implemented over the bound `ctx.command` facade because no flags publish works with core `0.2.0-20260908.x` yet (see [Usage](#usage)). Two command-first deltas, both gh-faithful: value resolution consumes + glues via the owned descriptor (spellings with no table row never consume — the remedy is a table row), and the info-only check stays bundle-blind like the flags original. When flags republishes with #117 support these delete and the provider moves back — keys, shapes, and verdicts for table-listed spellings are unchanged.
 
 ## Disabling
 
@@ -188,7 +206,7 @@ Strict rules are still individually disableable at the config level:
 
 ```ts
 export default defineConfig({
-  plugins: [flagsPlugin, githubPlugin], // flagsPlugin required — see Usage
+  plugins: [githubPlugin],
   // Keep the issue-link policy but allow inline --body anywhere.
   disabledRules: ["pr-body-from-vault-file", "issue-body-from-vault-file"],
 });
@@ -211,21 +229,23 @@ When the built-in predicate isn't enough, reach for the exported helpers inside 
 - `renderBodyFileDiff(word)` — the byte-diff diagnostic for the two body-file rules: byte pair when a diverging program token is close to the pinned strip, the two full command lines otherwise (always followed by the canonical static recipe).
 - `resolveAgainstCwd(ctx, path)` — resolve a path against the command's effective cwd (`null` on walker-unknown cwd).
 - `bodyHasClosingKeyword(ctx)` — does the body (stripped vault body-file content, or inline `--body`) carry a closing-keyword ref?
-- `isInfoOnly(args, extraFlags?)` from `@cad0p/pi-steering-flags` — token-level info-only check for `--help`/`--version` plus additive CLI-specific flags such as `-h`; quote-aware, including attached forms.
 - `unquote(text)` / `argText(ctx)` — low-level walker-word utilities.
+- `ctx.command` (core facade) — `hasFlag` / `getFlagValue` / `getAllFlagValues` / `positionals()` / `isInfoOnly`, bound through the owned gh descriptor; prefer it over hand-rolled argv scans.
 
-The pattern constants (`CLOSING_KEYWORD`, `ISSUE_REF`, `TITLE_WITH_REF`, `SUBJECT_WITH_REF`, `BODY_WITH_REF`, `PR_BODY_ANCHOR`, `PR_CREATE_ANCHOR`, `PR_MERGE_ANCHOR`, `ISSUE_BODY_ANCHOR`, `REPO_CREATE_ANCHOR`, `REPO_CREATE_SEED_FLAG`, `REPO_CREATE_PATTERN`, `REPO_FLAG_ANCHOR`) are exported too — they are what the rules ship, pinned by the unit tests. The rule objects (`ghRepoFlagBeforeSubcommand`, …), both predicate handlers (`missingVaultBodyFile`, `foreignRepoTarget`), the `foreignRepoReason` ReasonFn (module-exported from `src/rules/gh-repo-flag-before-subcommand.ts`), and the `repoName` helper (from `src/helpers/repo-name.ts`) are re-exported as well.
+The gh descriptor (`GH_CLI_DESCRIPTOR` + the `GH_*_FLAG` entry consts — single source with the flag table) and the content-pattern constants (`CLOSING_KEYWORD`, `ISSUE_REF`, `TITLE_WITH_REF`, `SUBJECT_WITH_REF`, `BODY_WITH_REF`) are exported too — the content patterns are pinned by the unit tests. (The `^gh\s+` anchor family is retired — routing is structural now, closes #55.) The rule objects (`ghRepoFlagBeforeSubcommand`, …), the predicate handlers (`missingVaultBodyFile`, `foreignRepoTarget`, `infoOnly`, `requiresFlagValue`), the `foreignRepoReason` ReasonFn (module-exported from `src/rules/gh-repo-flag-before-subcommand.ts`), and the `repoName` helper (from `src/helpers/repo-name.ts`) are re-exported as well.
 
 ## Known limitations
 
 - **Inline `--body` is blocked** by the vault body-file rules by design — the file is the source of truth. If you need inline bodies, disable those rules.
 - **`--body-file` content is checked at eval time** by `pr-create-needs-issue-link` (and the merge gate no longer inspects the body at all — the `--subject` channel is sufficient): the file must already contain the closing keyword when the command runs. `pr-merge-needs-closing-keywords` checks only the explicit `--subject` value.
-- **Value-region truncation**: pattern matching runs on the walker-normalized command, and a flag's value region ends at the next `\s-` pair. A value containing a literal ` - ` (space-dash-space) truncates the region, so a closing-keyword ref after such a sequence may be missed (rule fires; add the keyword earlier in the value). The `pr-merge-needs-closing-keywords` subject check is immune (argv-based), but the same class still applies to the string-level `--body-file` substitution pins.
-- **Exact quoted info tokens**: `isInfoOnly` intentionally removes shell quotes before checking exact argv tokens. Consequently, `--subject "--help"` and `--subject "--version"` are indistinguishable from bare info-only flags and are released; surrounding text such as `"see --help"` and `"see --version"` remains blocked.
-- **Quoted-value false exemption (`gh-repo-create-needs-seed`)**: a seed-looking token inside a QUOTED flag value (e.g. `--description "see --license mit"`) falsely exempts the command — the token guard kills only GLUED lookalikes (`-local`, `foo--add-readme`), not space-separated tokens inside quoted values. Deliberately exploitable: an agent could embed a fake seed mention and still birth an empty repo. Accepted — same value-region class as the PR_* patterns; the walker contract is the plugin's foundation.
-- **Slashless `-R <remote>`** (remote-name form, no `/`) routes to the rule but is released by the `foreignRepoTarget` predicate (no `/` → not a foreign owner/repo redirect). Post-#41 the released command then lands on its per-subcommand policy (`gh -R upstream pr create --title t` is caught by the vault-body rule); the fork→upstream flow itself is unaffected when those policies are satisfied.
-- **`-R x/y repo create` stays ungated** by the redirect (the repo doesn't exist yet — nothing to cd into). That exclusion is about the foreign gate only: since #41 the seed rule's widened anchor gates bare creates in any leading-flag position.
-- **`-R`-prefixed VALUE words** (the glue-awareness trade-off): declaring `{ gluedShorts: ["R"] }` makes ANY `-R<rest>` word resolvable at any position — a quoted body value like `-m "-Rfoo/bar ref"` can hijack target resolution → fail-closed over-block; slashless lookalikes (`"-Rebased onto main"`) resolve to slashless targets and release via the fork-flow step. Opt-in contract per ShellCheck-norm gluing rules: upstream cad0p/pi-steering-flags#11 (shipped `0.1.1-20260824.0`).
+- **Exact quoted info tokens**: the info-only check intentionally removes shell quotes before checking exact argv tokens. Consequently, `--subject "--help"` and `--subject "--version"` are indistinguishable from bare info-only flags and are released; surrounding text such as `"see --help"` and `"see --version"` remains blocked.
+- **Value-region truncation is gone**: keyword checks now read whole flag values through the bound facade (last-wins, quote-aware) — a closing-keyword ref after a literal ` - ` can no longer be missed by truncation. The `--body-file` substitution pins were never region-based (exact word classification).
+- **Quoted-value seed lookalikes now block (improvement)**: a seed-looking token inside a QUOTED flag value (`--description "see --license mit"`) used to falsely exempt; the token-level `not.flag` leaf reads the quoted value as one non-flag word → absent → blocked. The documented hole is closed structurally.
+- **Pflag-faithful glue exempts `-local` / `-public` (accepted)**: bundle matching derives from the descriptor table, so `-local` reads as `-l` (license) and `-public` as `-p` (template) — gh parses both the same way, then rejects the junk seed values at runtime, so nothing real executes. Glued lookalikes without a leading dash (`foo--add-readme`) still never match.
+- **Case-exact routing**: `command: "gh"` is basename-exact — uppercase `GH` (runtime command-not-found) no longer routes. The old `/i` anchors covered it; accepted delta, pinned by the tests.
+- **Slashless `-R <remote>`** (remote-name form, no `/`) routes to the rule but is released by the `foreignRepoTarget` predicate (no `/` → not a foreign owner/repo redirect). The released command then lands on its per-subcommand policy (`gh -R upstream pr create --title t` is caught by the vault-body rule); the fork→upstream flow itself is unaffected when those policies are satisfied.
+- **`-R x/y repo create` stays ungated** by the redirect (the repo doesn't exist yet — nothing to cd into). That exclusion is about the foreign gate only: the seed rule gates bare creates in any leading-flag position.
+- **`-R`-prefixed VALUE words** (the glue trade-off): table-derived glue for `R` decomposes ANY `-R<rest>` word at any position — a quoted body value like `-m "-Rfoo/bar ref"` can hijack target resolution → fail-closed over-block; slashless lookalikes (`"-Rebased onto main"`) resolve to slashless targets and release via the fork-flow step.
 
 ## License
 

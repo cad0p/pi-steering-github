@@ -12,7 +12,10 @@
  * `<repo>/issues/`. No keyword requirement (issues close nothing).
  * Routes on `command: "gh"` + the `subcommand:` sequences — ANY
  * leading-flag position is structural now, so a gate-released
- * flag-first form lands here instead of bypassing the policy.
+ * flag-first form lands here instead of bypassing the policy. Edit
+ * scoping (#44): an `issue edit` carrying no body-affecting flag
+ * (`--body`/`-b`, `--body-file`/`-F`) skips this rule — `gh issue
+ * edit 8845 --add-label bug` passes without the substitution.
  *
  * Strict — no override (schema default).
  *

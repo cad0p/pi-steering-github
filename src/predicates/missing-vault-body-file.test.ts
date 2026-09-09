@@ -171,6 +171,91 @@ describe("missingVaultBodyFile", () => {
     assert.equal(await missingVaultBodyFile({ section: "prs" }, ctx), true);
   });
 
+  it("#44: does NOT fire for label/title/state edits (no body-affecting flag)", async () => {
+    // The vault-body policy applies to an edit only when the command
+    // writes the body — the pi#8845 live over-block (`gh issue edit
+    // 8845 --add-label bug`).
+    for (const [section, args, command] of [
+      [
+        "issues",
+        [
+          { text: "issue" },
+          { text: "edit" },
+          { text: "8845" },
+          { text: "--add-label" },
+          { text: "bug" },
+        ],
+        "gh issue edit 8845 --add-label bug",
+      ],
+      [
+        "issues",
+        [
+          { text: "issue" },
+          { text: "edit" },
+          { text: "29" },
+          { text: "--title" },
+          { text: "t" },
+        ],
+        "gh issue edit 29 --title t",
+      ],
+      [
+        "prs",
+        [
+          { text: "pr" },
+          { text: "edit" },
+          { text: "46" },
+          { text: "--state" },
+          { text: "closed" },
+        ],
+        "gh pr edit 46 --state closed",
+      ],
+    ] as const) {
+      const ctx = makeCtx(args, "/work/repo", undefined, undefined, command);
+      assert.equal(
+        await missingVaultBodyFile({ section }, ctx),
+        false,
+        `expected release for: ${command}`,
+      );
+    }
+  });
+
+  it("#44: still fires for edits carrying --body / --body-file", async () => {
+    // An inline --body is a direct write (bodies must come from the
+    // vault); a direct --body-file path uploads verbatim — both
+    // stay blocked.
+    const inline = makeCtx(
+      [
+        { text: "issue" },
+        { text: "edit" },
+        { text: "29" },
+        { text: "--body" },
+        { text: "inline" },
+      ],
+      "/work/repo",
+      undefined,
+      undefined,
+      "gh issue edit 29 --body inline",
+    );
+    assert.equal(
+      await missingVaultBodyFile({ section: "issues" }, inline),
+      true,
+    );
+    const direct = makeCtx(
+      [
+        { text: "pr" },
+        { text: "edit" },
+        { text: "46" },
+        { text: "--body-file" },
+        { text: "/direct.md" },
+      ],
+      "/work/repo",
+      undefined,
+      undefined,
+      "gh pr edit 46 --body-file /direct.md",
+    );
+    assert.equal(await missingVaultBodyFile({ section: "prs" }, direct), true);
+  });
+
   it("does NOT fire for the pinned perl substitution (valid vault prs/ file)", async () => {
     const fx = makeVaultRepoFixture("fixture-repo");
     const ctx = makeCtx(

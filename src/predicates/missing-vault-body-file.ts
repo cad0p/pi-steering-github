@@ -25,7 +25,9 @@
  * from the pinned token sequence, OR the path fails the vault check
  * (nonexistent, outside a vault, wrong section, wrong repo,
  * walker-unknown cwd). Fail-closed: anything unverifiable counts as
- * missing.
+ * missing. Edit scoping (#44): an `edit` carrying no body-affecting
+ * flag (`--body`/`-b`, `--body-file`/`-F`) is NOT missing —
+ * label/title/state/assignee edits pass without the substitution.
  *
  * Args:
  *
@@ -42,6 +44,7 @@ import { existsSync, statSync } from "node:fs";
 import { dirname, relative, sep } from "node:path";
 import { isNapkinVaultDir } from "@cad0p/pi-napkin/steering";
 import type { PredicateContext, PredicateHandler } from "@cad0p/pi-steering";
+import { GH_BODY_FILE_FLAG, GH_BODY_FLAG } from "../descriptors.ts";
 import {
   explainBodyFileArg,
   findBodyFileValue,
@@ -115,6 +118,19 @@ export async function diagnose(
     vaultRoot: null as string | null,
     repo: null as string | null,
   };
+  // Edit scoping (#44): the vault-body policy applies to an `edit` only
+  // when the command WRITES the body. A label/title/state/assignee edit
+  // carries no body-affecting flag (`--body`/`-b`, `--body-file`/`-F`)
+  // and passes without the substitution; `create` is always gated.
+  // The verb is the facade positional after the noun (`pr edit …` →
+  // `["pr", "edit", …]` — declared consuming-flag values never
+  // leak into the run).
+  if (ctx.command.positionals()[1] === "edit") {
+    const touchesBody =
+      ctx.command.hasFlag(GH_BODY_FLAG) ||
+      ctx.command.hasFlag(GH_BODY_FILE_FLAG);
+    if (!touchesBody) return { ...base, blocked: false };
+  }
   if (received === "") return { ...base, blocked: true };
   const parsed = parseBodyFileArg(received);
   if (parsed === null) return { ...base, blocked: true };

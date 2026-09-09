@@ -17,7 +17,10 @@
  * leading-flag position is structural now (the descriptor's
  * consuming-flag arity keeps `gh --hostname h pr create …` routed;
  * pre-#41 a flag-first form released by the foreign gate bypassed
- * this policy entirely, now it lands here).
+ * this policy entirely, now it lands here). Edit scoping (#44): a
+ * `pr edit` carrying no body-affecting flag (`--body`/`-b`,
+ * `--body-file`/`-F`) skips this rule — label/title/state edits pass
+ * without the substitution.
  *
  * Strict — no override (schema default).
  *
