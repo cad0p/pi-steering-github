@@ -44,7 +44,7 @@ import { existsSync, statSync } from "node:fs";
 import { dirname, relative, sep } from "node:path";
 import { isNapkinVaultDir } from "@cad0p/pi-napkin/steering";
 import type { PredicateContext, PredicateHandler } from "@cad0p/pi-steering";
-import { GH_BODY_FILE_FLAG, GH_BODY_FLAG } from "../descriptors.ts";
+import { GH_CLI_DESCRIPTOR } from "../descriptors.ts";
 import {
   explainBodyFileArg,
   findBodyFileValue,
@@ -54,6 +54,9 @@ import {
 import { repoName } from "../helpers/repo-name.ts";
 
 export { BODY_STRIP } from "../helpers/pattern-args.ts";
+
+/** Table-owned gh flag entries, referenced by variable (never re-spelled). */
+const { flags: ghFlags } = GH_CLI_DESCRIPTOR;
 
 /** The vault-relative directory the body file must live under. */
 export type BodyFileSection = "prs" | "issues";
@@ -127,8 +130,8 @@ export async function diagnose(
   // leak into the run).
   if (ctx.command.positionals()[1] === "edit") {
     const touchesBody =
-      ctx.command.hasFlag(GH_BODY_FLAG) ||
-      ctx.command.hasFlag(GH_BODY_FILE_FLAG);
+      ctx.command.hasFlag(ghFlags.body) ||
+      ctx.command.hasFlag(ghFlags.bodyFile);
     if (!touchesBody) return { ...base, blocked: false };
   }
   if (received === "") return { ...base, blocked: true };

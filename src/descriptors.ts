@@ -68,84 +68,16 @@
  * `rules/gh-repo-create-needs-seed.test.ts`.
  */
 
-import type { CLIDescriptor, CLIFlag } from "@cad0p/pi-steering";
-
-/** `-R` / `--repo` — the global repo selector (takesValue:true). */
-export const GH_REPO_FLAG = {
-  aliases: ["-R", "--repo"],
-  takesValue: true,
-} as const satisfies CLIFlag;
-
-/** `--hostname` — legacy/compat spelling (see header). */
-export const GH_HOSTNAME_FLAG = {
-  aliases: ["--hostname"],
-  takesValue: true,
-} as const satisfies CLIFlag;
-
-/** `-F` / `--body-file` — the vault-substitution channel. */
-export const GH_BODY_FILE_FLAG = {
-  aliases: ["--body-file", "-F"],
-  takesValue: true,
-} as const satisfies CLIFlag;
-
-/** `-b` / `--body` — inline body (disabled-rules fallback). */
-export const GH_BODY_FLAG = {
-  aliases: ["--body", "-b"],
-  takesValue: true,
-} as const satisfies CLIFlag;
-
-/** `-t` / `--title` — `pr create` / `issue create` title. */
-export const GH_TITLE_FLAG = {
-  aliases: ["--title", "-t"],
-  takesValue: true,
-} as const satisfies CLIFlag;
-
-/** `--subject` (+ `-t`) — `pr merge` squash-commit subject. */
-export const GH_SUBJECT_FLAG = {
-  aliases: ["--subject", "-t"],
-  takesValue: true,
-} as const satisfies CLIFlag;
-
-/** `--add-readme` — seed flag (bool). */
-export const GH_ADD_README_FLAG = {
-  aliases: ["--add-readme"],
-  takesValue: false,
-} as const satisfies CLIFlag;
-
-/** `--gitignore` / `-g` — seed flag (`<lang>`). */
-export const GH_GITIGNORE_FLAG = {
-  aliases: ["--gitignore", "-g"],
-  takesValue: true,
-} as const satisfies CLIFlag;
-
-/** `--license` / `-l` — seed flag (`<keyword>`). */
-export const GH_LICENSE_FLAG = {
-  aliases: ["--license", "-l"],
-  takesValue: true,
-} as const satisfies CLIFlag;
-
-/** `--template` / `-p` — seed flag (`<repo>`). */
-export const GH_TEMPLATE_FLAG = {
-  aliases: ["--template", "-p"],
-  takesValue: true,
-} as const satisfies CLIFlag;
-
-/** `-h` / `--help` — bool (rides the infoOnly carve-out). */
-export const GH_HELP_FLAG = {
-  aliases: ["-h", "--help"],
-  takesValue: false,
-} as const satisfies CLIFlag;
-
-/** `--version` — bool. */
-export const GH_VERSION_FLAG = {
-  aliases: ["--version"],
-  takesValue: false,
-} as const satisfies CLIFlag;
+import type { CLIDescriptor } from "@cad0p/pi-steering";
 
 /**
  * gh descriptor: `globals-anywhere` (the walker's own documented gh
  * example — `gh -R x/y pr merge` ≡ `gh pr merge -R x/y`) + the flag
- * table above.
+ * table below, which OWNS every flag entry (core git-descriptor
+ * shape): entries live INLINE here and every consumer reads them via
+ * `GH_CLI_DESCRIPTOR.flags.<key>` (or a destructured `ghFlags` alias
+ * at use sites) — there are no standalone exported `GH_*_FLAG`
+ * consts, so the table and its readers cannot drift.
  *
  * Referenced by name (never inlined) in the plugin literal so hover
  * rides on this const.
@@ -153,17 +85,65 @@ export const GH_VERSION_FLAG = {
 export const GH_CLI_DESCRIPTOR = {
   positionPolicy: "globals-anywhere",
   flags: {
-    repo: GH_REPO_FLAG,
-    hostname: GH_HOSTNAME_FLAG,
-    bodyFile: GH_BODY_FILE_FLAG,
-    body: GH_BODY_FLAG,
-    title: GH_TITLE_FLAG,
-    subject: GH_SUBJECT_FLAG,
-    addReadme: GH_ADD_README_FLAG,
-    gitignore: GH_GITIGNORE_FLAG,
-    license: GH_LICENSE_FLAG,
-    template: GH_TEMPLATE_FLAG,
-    help: GH_HELP_FLAG,
-    version: GH_VERSION_FLAG,
+    /** `-R` / `--repo` — the global repo selector (takesValue:true). */
+    repo: {
+      aliases: ["-R", "--repo"],
+      takesValue: true,
+    },
+    /** `--hostname` — legacy/compat spelling (see header). */
+    hostname: {
+      aliases: ["--hostname"],
+      takesValue: true,
+    },
+    /** `-F` / `--body-file` — the vault-substitution channel. */
+    bodyFile: {
+      aliases: ["--body-file", "-F"],
+      takesValue: true,
+    },
+    /** `-b` / `--body` — inline body (disabled-rules fallback). */
+    body: {
+      aliases: ["--body", "-b"],
+      takesValue: true,
+    },
+    /** `-t` / `--title` — `pr create` / `issue create` title. */
+    title: {
+      aliases: ["--title", "-t"],
+      takesValue: true,
+    },
+    /** `--subject` (+ `-t`) — `pr merge` squash-commit subject. */
+    subject: {
+      aliases: ["--subject", "-t"],
+      takesValue: true,
+    },
+    /** `--add-readme` — seed flag (bool). */
+    addReadme: {
+      aliases: ["--add-readme"],
+      takesValue: false,
+    },
+    /** `--gitignore` / `-g` — seed flag (`<lang>`). */
+    gitignore: {
+      aliases: ["--gitignore", "-g"],
+      takesValue: true,
+    },
+    /** `--license` / `-l` — seed flag (`<keyword>`). */
+    license: {
+      aliases: ["--license", "-l"],
+      takesValue: true,
+    },
+    /** `--template` / `-p` — seed flag (`<repo>`). */
+    template: {
+      aliases: ["--template", "-p"],
+      takesValue: true,
+    },
+    /** `-h` / `--help` — bool (rides the infoOnly carve-out). */
+    help: {
+      aliases: ["-h", "--help"],
+      takesValue: false,
+    },
+    /** `--version` — bool. */
+    version: {
+      aliases: ["--version"],
+      takesValue: false,
+    },
   },
 } as const satisfies CLIDescriptor;

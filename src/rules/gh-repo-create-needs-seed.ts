@@ -37,12 +37,7 @@
  */
 
 import type { Rule } from "@cad0p/pi-steering";
-import {
-  GH_ADD_README_FLAG,
-  GH_GITIGNORE_FLAG,
-  GH_LICENSE_FLAG,
-  GH_TEMPLATE_FLAG,
-} from "../descriptors.ts";
+import { GH_CLI_DESCRIPTOR } from "../descriptors.ts";
 
 export const ghRepoCreateNeedsSeed = {
   name: "gh-repo-create-needs-seed",
@@ -58,11 +53,15 @@ export const ghRepoCreateNeedsSeed = {
     },
     not: {
       flag: {
+        // Seed entries referenced BY VARIABLE from the owning table
+        // (core git-descriptor shape — never a hand-built literal in
+        // the rule; a duplicated literal can skew from the table into
+        // silent fail-open).
         anyOf: [
-          GH_ADD_README_FLAG,
-          GH_GITIGNORE_FLAG,
-          GH_LICENSE_FLAG,
-          GH_TEMPLATE_FLAG,
+          GH_CLI_DESCRIPTOR.flags.addReadme,
+          GH_CLI_DESCRIPTOR.flags.gitignore,
+          GH_CLI_DESCRIPTOR.flags.license,
+          GH_CLI_DESCRIPTOR.flags.template,
         ],
       },
     },

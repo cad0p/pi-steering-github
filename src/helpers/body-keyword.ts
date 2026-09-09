@@ -22,7 +22,7 @@ import {
   expandTildeIfLeading,
   type PredicateContext,
 } from "@cad0p/pi-steering";
-import { GH_BODY_FLAG } from "../descriptors.ts";
+import { GH_CLI_DESCRIPTOR } from "../descriptors.ts";
 import { BODY_STRIP } from "./body-strip.ts";
 import {
   findBodyFileRawValue,
@@ -31,6 +31,9 @@ import {
   tildeEnv,
 } from "./pattern-args.ts";
 import { ISSUE_REF } from "./patterns.ts";
+
+/** Table-owned gh flag entries, referenced by variable (never re-spelled). */
+const { flags: ghFlags } = GH_CLI_DESCRIPTOR;
 
 export async function bodyHasClosingKeyword(
   ctx: PredicateContext,
@@ -83,7 +86,7 @@ export async function bodyHasClosingKeyword(
   // --body/-b aliases via the bound facade — the same gh/cobra
   // semantics the merge rule's requiresFlagValue leaf enforces (the
   // old first-occurrence scan is retired).
-  const inline = ctx.command.getFlagValue(GH_BODY_FLAG);
+  const inline = ctx.command.getFlagValue(ghFlags.body);
   if (inline !== null) return refRe.test(inline);
   return false;
 }

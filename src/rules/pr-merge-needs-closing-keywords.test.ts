@@ -11,6 +11,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { GH_CLI_DESCRIPTOR } from "../descriptors.ts";
 import { ISSUE_REF } from "../helpers/patterns.ts";
 import { prMergeNeedsClosingKeywords } from "./pr-merge-needs-closing-keywords.ts";
 
@@ -59,13 +60,16 @@ describe("github plugin — pr-merge-needs-closing-keywords (declarative shape)"
       { extraFlags: ["-h"] },
       "the info-only carve-out must be negated via not:",
     );
-    // Subject leaf: LAST-flag-wins across the --subject/-t aliases;
-    // the pattern is compared by source/flags (deepEqual compares
-    // RegExps exactly that way), not by identity.
+    // Subject leaf: LAST-flag-wins across the subject aliases — derived
+    // from the owning table entry (INTENTIONALLY changed: was the
+    // hand-built literal `["--subject", "-t"]`; the rule now spreads
+    // the entry's `aliases`, so a table change flows through with no
+    // second edit site). The pattern is compared by source/flags
+    // (deepEqual compares RegExps exactly that way), not by identity.
     assert.deepEqual(
       rule.when?.requiresFlagValue,
       {
-        flags: ["--subject", "-t"],
+        flags: [...GH_CLI_DESCRIPTOR.flags.subject.aliases],
         matches: new RegExp(ISSUE_REF, "i"),
       },
       "requiresFlagValue must pin the alias set and the ISSUE_REF match",

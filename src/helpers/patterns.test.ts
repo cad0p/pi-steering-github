@@ -14,36 +14,35 @@
  * defineConfig + loadHarness) and the descriptor value pin in
  * `../descriptors.test.ts`. What remains pinned here are the
  * VALUE-content patterns the keyword rules test flag values against.
+ *
+ * The flag+value-region builders (`TITLE_WITH_REF`,
+ * `SUBJECT_WITH_REF`, `BODY_WITH_REF`) are INTENTIONALLY unpinned —
+ * deleted: keyword checks extract the value through the bound facade
+ * (`ctx.command.getFlagValue(ghFlags.<key>)`) and test `ISSUE_REF`
+ * against the extracted value, so flag spellings live only in the
+ * descriptor table. The value-side pins below feed `ISSUE_REF` bare
+ * extracted values (what the facade hands the rules), never raw
+ * flag-carrying command text.
  */
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import {
-  BODY_WITH_REF,
-  CLOSING_KEYWORD,
-  ISSUE_REF,
-  SUBJECT_WITH_REF,
-  TITLE_WITH_REF,
-} from "./patterns.ts";
+import { CLOSING_KEYWORD, ISSUE_REF } from "./patterns.ts";
 
 describe("github plugin — content patterns", () => {
   it("closing-keyword family and issue-ref are exported for pinning", () => {
     assert.match(CLOSING_KEYWORD, /close/);
     assert.match(ISSUE_REF, /#\\d/);
-    assert.match(TITLE_WITH_REF, /--title/);
-    assert.match(SUBJECT_WITH_REF, /--subject/);
-    assert.match(BODY_WITH_REF, /--body/);
   });
 
-  it("title/subject/body value patterns require the ref inside the value region", () => {
-    const titleRe = new RegExp(TITLE_WITH_REF, "i");
-    assert.equal(titleRe.test('--title "feat: x (closes #12)"'), true);
-    assert.equal(titleRe.test("--title plain"), false);
-    const subjectRe = new RegExp(SUBJECT_WITH_REF, "i");
-    assert.equal(subjectRe.test('--subject "feat: x (fixes #7)"'), true);
-    assert.equal(subjectRe.test("--subject plain"), false);
-    const bodyRe = new RegExp(BODY_WITH_REF, "i");
-    assert.equal(bodyRe.test('--body "see resolves #3"'), true);
-    assert.equal(bodyRe.test("--body plain"), false);
+  it("issue-ref matches extracted flag values carrying a closing keyword", () => {
+    // Bare extracted values (facade output — no flag spellings): the
+    // title/subject/body channels all test this one pattern.
+    const refRe = new RegExp(ISSUE_REF, "i");
+    assert.equal(refRe.test("feat: x (closes #12)"), true);
+    assert.equal(refRe.test("feat: x (fixes #7)"), true);
+    assert.equal(refRe.test("see resolves #3"), true);
+    assert.equal(refRe.test("plain text, no keyword"), false);
+    assert.equal(refRe.test("see #12 without a keyword"), false);
   });
 });

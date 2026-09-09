@@ -12,6 +12,13 @@
 // `REPO_FLAG_ANCHOR`, `REPO_CREATE_PATTERN`, `REPO_CREATE_SEED_FLAG`)
 // is retired. What remains here are the VALUE-content patterns the
 // keyword rules test flag values against.
+//
+// The flag+value-region builders (`TITLE_WITH_REF`, `SUBJECT_WITH_REF`,
+// `BODY_WITH_REF` — flag spellings smuggled as string literals) are
+// retired too: keyword checks extract the value through the bound
+// facade (`ctx.command.getFlagValue(ghFlags.<key>)`) and test
+// `ISSUE_REF` against the extracted value — whole-value, last-wins,
+// quote-aware, no truncation. This module stays CONTENT-ONLY.
 
 /**
  * Closing-keyword family GitHub recognizes (docs: "Linking a pull
@@ -26,25 +33,3 @@ export const CLOSING_KEYWORD =
  * `CLOSES #10` (colon optional, case-insensitive at use).
  */
 export const ISSUE_REF = `${CLOSING_KEYWORD}\\s*:?\\s*#\\d+`;
-
-/**
- * A flag's value region = the run of characters after the flag token
- * up to the next `\s-` pair (a space followed by `-` — the next
- * flag-looking token starts there). The reference must appear INSIDE
- * that region. Known limitation: a value containing a literal ` - `
- * (space-dash-space) truncates the region.
- */
-const VALUE_REGION = `(?:(?!\\s-)[\\s\\S])*?`;
-
-/** `--flag …closes #N…`, `-f …`, `--flag=…` — the VALUE must hold the ref. */
-const flagValueWithRef = (long: string, short: string) =>
-  `(?:${long}|${short})(?:\\s+|=)${VALUE_REGION}${ISSUE_REF}`;
-
-/** `--title|-t` value must hold the ref (create). */
-export const TITLE_WITH_REF = flagValueWithRef("--title", "-t");
-
-/** `--subject|-t` value must hold the ref (merge — the commit subject). */
-export const SUBJECT_WITH_REF = flagValueWithRef("--subject", "-t");
-
-/** `--body|-b` value must hold the ref (create inline fallback). */
-export const BODY_WITH_REF = flagValueWithRef("--body", "-b");

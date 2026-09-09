@@ -31,6 +31,7 @@
  */
 
 import type { Rule } from "@cad0p/pi-steering";
+import { GH_CLI_DESCRIPTOR } from "../descriptors.ts";
 import { ISSUE_REF } from "../helpers/patterns.ts";
 
 export const prMergeNeedsClosingKeywords = {
@@ -41,7 +42,11 @@ export const prMergeNeedsClosingKeywords = {
     subcommand: { anyOf: [["pr", "merge"]], onUnknown: "allow" },
     not: { infoOnly: { extraFlags: ["-h"] } },
     requiresFlagValue: {
-      flags: ["--subject", "-t"],
+      // Subject aliases derived from the owning table entry (never a
+      // hand-built literal — requiresFlagValue takes spellings, so
+      // the entry's `aliases` are spread here; a table change flows
+      // through without a second edit site).
+      flags: [...GH_CLI_DESCRIPTOR.flags.subject.aliases],
       matches: new RegExp(ISSUE_REF, "i"),
     },
   },

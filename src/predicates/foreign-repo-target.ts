@@ -30,7 +30,7 @@
  *      ("unknown" sentinel or null) → BLOCK.
  *
  * Flag access reads through the bound `ctx.command` facade
- * (`GH_REPO_FLAG` entry, glue + consumption from this plugin's OWNED
+ * (`ghFlags.repo` entry, glue + consumption from this plugin's OWNED
  * gh descriptor — #61): LAST-wins across the `-R`/`--repo` alias set
  * (gh/cobra collapse repeated spellings of one logical flag to the
  * final value — issue #34), bare `-R`, attached `--repo=`/`-R=`, AND
@@ -59,8 +59,11 @@ import {
   definePredicate,
   unwrapBooleanLeafArg,
 } from "@cad0p/pi-steering";
-import { GH_REPO_FLAG } from "../descriptors.ts";
+import { GH_CLI_DESCRIPTOR } from "../descriptors.ts";
 import { repoName } from "../helpers/repo-name.ts";
+
+/** Table-owned gh flag entries, referenced by variable (never re-spelled). */
+const { flags: ghFlags } = GH_CLI_DESCRIPTOR;
 
 /**
  * `foreignRepoTarget` — true (BLOCK) when the effective `-R`/`--repo`
@@ -80,13 +83,13 @@ export const foreignRepoTarget = definePredicate<BooleanLeafArgs>(
     // Step 1 — PRESENCE gate (#39) via the bound facade. Absent →
     // not repo-targeting → release; evaluation falls through to the
     // per-subcommand rules.
-    if (!ctx.command.hasFlag(GH_REPO_FLAG)) return false;
+    if (!ctx.command.hasFlag(ghFlags.repo)) return false;
 
     // Step 2 — the effective target (last-wins across the aliases,
     // glue-aware via the owned descriptor). A trailing valueless
     // alias or an empty attached value as the last occurrence wins
     // and fail-closes (null / "" → block below).
-    const target = ctx.command.getFlagValue(GH_REPO_FLAG);
+    const target = ctx.command.getFlagValue(ghFlags.repo);
     // Step 3 — fail-closed on an unparsable target.
     if (target === null || target === "") return true;
     // Step 4 — slashless remote-name forms (`-R upstream`) are the

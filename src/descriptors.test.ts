@@ -8,21 +8,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import {
-  GH_ADD_README_FLAG,
-  GH_BODY_FILE_FLAG,
-  GH_BODY_FLAG,
-  GH_CLI_DESCRIPTOR,
-  GH_GITIGNORE_FLAG,
-  GH_HELP_FLAG,
-  GH_HOSTNAME_FLAG,
-  GH_LICENSE_FLAG,
-  GH_REPO_FLAG,
-  GH_SUBJECT_FLAG,
-  GH_TEMPLATE_FLAG,
-  GH_TITLE_FLAG,
-  GH_VERSION_FLAG,
-} from "./descriptors.ts";
+import { GH_CLI_DESCRIPTOR } from "./descriptors.ts";
 
 describe("github plugin — gh CLI descriptor", () => {
   it("pins the descriptor by value (position policy + full flag table)", () => {
@@ -45,19 +31,26 @@ describe("github plugin — gh CLI descriptor", () => {
     });
   });
 
-  it("entry consts are the table values (single source — table and rules can't drift)", () => {
-    const flags = GH_CLI_DESCRIPTOR.flags;
-    assert.equal(flags.repo, GH_REPO_FLAG);
-    assert.equal(flags.hostname, GH_HOSTNAME_FLAG);
-    assert.equal(flags.bodyFile, GH_BODY_FILE_FLAG);
-    assert.equal(flags.body, GH_BODY_FLAG);
-    assert.equal(flags.title, GH_TITLE_FLAG);
-    assert.equal(flags.subject, GH_SUBJECT_FLAG);
-    assert.equal(flags.addReadme, GH_ADD_README_FLAG);
-    assert.equal(flags.gitignore, GH_GITIGNORE_FLAG);
-    assert.equal(flags.license, GH_LICENSE_FLAG);
-    assert.equal(flags.template, GH_TEMPLATE_FLAG);
-    assert.equal(flags.help, GH_HELP_FLAG);
-    assert.equal(flags.version, GH_VERSION_FLAG);
+  it("the table owns every flag entry: exactly the twelve keys, no sideways consts", () => {
+    // Doctrine alignment (core git-descriptor shape): entries live
+    // INLINE in the table — there are no standalone exported
+    // `GH_*_FLAG` consts for the table and the rules to drift apart.
+    // Consumers read `GH_CLI_DESCRIPTOR.flags.<key>` (or a
+    // destructured `ghFlags` alias). This pin guards the key set; the
+    // value pin above guards every aliases/takesValue row.
+    assert.deepEqual(Object.keys(GH_CLI_DESCRIPTOR.flags).sort(), [
+      "addReadme",
+      "body",
+      "bodyFile",
+      "gitignore",
+      "help",
+      "hostname",
+      "license",
+      "repo",
+      "subject",
+      "template",
+      "title",
+      "version",
+    ]);
   });
 });

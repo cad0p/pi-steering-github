@@ -208,21 +208,7 @@ export {
   type RequiresFlagValueArgs,
   requiresFlagValue,
 } from "@cad0p/pi-steering-flags";
-export {
-  GH_ADD_README_FLAG,
-  GH_BODY_FILE_FLAG,
-  GH_BODY_FLAG,
-  GH_CLI_DESCRIPTOR,
-  GH_GITIGNORE_FLAG,
-  GH_HELP_FLAG,
-  GH_HOSTNAME_FLAG,
-  GH_LICENSE_FLAG,
-  GH_REPO_FLAG,
-  GH_SUBJECT_FLAG,
-  GH_TEMPLATE_FLAG,
-  GH_TITLE_FLAG,
-  GH_VERSION_FLAG,
-} from "./descriptors.ts";
+export { GH_CLI_DESCRIPTOR } from "./descriptors.ts";
 export {
   renderDegradedReason,
   renderDiagnosedReason,
@@ -245,17 +231,15 @@ export {
 } from "./helpers/pattern-args.ts";
 // Named re-exports for consumers that want to pick pieces: the
 // shipped rules (or the `rules` roster itself), the gh descriptor
-// entries (single source with the flag table), the content-pattern
-// constants (pinned by the unit tests), the predicate handler, and
+// (the table owns every flag entry — read via
+// `GH_CLI_DESCRIPTOR.flags.<key>`), the content-pattern constants
+// (pinned by the unit tests), the predicate handler, and
 // the arg helpers (`findBodyFileValue` / `parseBodyFileArg` parse the
 // pinned perl substitution form) for `when.condition` escape-hatch
 // use.
 export {
-  BODY_WITH_REF,
   CLOSING_KEYWORD,
   ISSUE_REF,
-  SUBJECT_WITH_REF,
-  TITLE_WITH_REF,
 } from "./helpers/patterns.ts";
 export { foreignRepoTarget } from "./predicates/foreign-repo-target.ts";
 export type {

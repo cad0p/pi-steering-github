@@ -16,9 +16,12 @@
  */
 
 import type { Rule } from "@cad0p/pi-steering";
-import { GH_TITLE_FLAG } from "../descriptors.ts";
+import { GH_CLI_DESCRIPTOR } from "../descriptors.ts";
 import { bodyHasClosingKeyword } from "../helpers/body-keyword.ts";
 import { ISSUE_REF } from "../helpers/patterns.ts";
+
+/** Table-owned gh flag entries, referenced by variable (never re-spelled). */
+const { flags: ghFlags } = GH_CLI_DESCRIPTOR;
 
 export const prCreateNeedsIssueLink = {
   name: "pr-create-needs-issue-link",
@@ -35,7 +38,7 @@ export const prCreateNeedsIssueLink = {
     condition: async (ctx) => {
       // Last-wins across the --title/-t aliases (gh/cobra collapse
       // repeated spellings to the final value) via the bound facade.
-      const title = ctx.command.getFlagValue(GH_TITLE_FLAG);
+      const title = ctx.command.getFlagValue(ghFlags.title);
       const titleOk = title !== null && new RegExp(ISSUE_REF, "i").test(title);
       return !titleOk || !(await bodyHasClosingKeyword(ctx));
     },

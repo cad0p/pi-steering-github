@@ -66,7 +66,7 @@
  */
 
 import type { PredicateContext, Rule } from "@cad0p/pi-steering";
-import { GH_REPO_FLAG } from "../descriptors.ts";
+import { GH_CLI_DESCRIPTOR } from "../descriptors.ts";
 
 export const ghRepoFlagBeforeSubcommand = {
   name: "gh-repo-flag-before-subcommand",
@@ -90,6 +90,9 @@ export const ghRepoFlagBeforeSubcommand = {
   reason: (ctx: PredicateContext) => foreignRepoReason(ctx),
 } as const satisfies Rule;
 
+/** Table-owned gh flag entries, referenced by variable (never re-spelled). */
+const { flags: ghFlags } = GH_CLI_DESCRIPTOR;
+
 /**
  * The dynamic block reason for `gh-repo-flag-before-subcommand`:
  * renders the EFFECTIVE `-R`/`--repo` target via the SAME facade
@@ -102,7 +105,7 @@ export const ghRepoFlagBeforeSubcommand = {
  * spelling. Never throws — the facade is total over argv.
  */
 export function foreignRepoReason(ctx: PredicateContext): string {
-  const target = ctx.command.getFlagValue(GH_REPO_FLAG);
+  const target = ctx.command.getFlagValue(ghFlags.repo);
   const via =
     target !== null && target !== ""
       ? `via ${target}`

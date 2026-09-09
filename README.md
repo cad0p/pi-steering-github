@@ -33,7 +33,7 @@ src/
 ├── index.ts                        # plugin assembly + roster + cliDescriptors + declare global + re-exports
 ├── index.test.ts                   # roster-order pin + reason-string byte-identity pins
 ├── integration.test.ts             # end-to-end pipeline tests
-├── descriptors.ts                  # the owned gh CLI descriptor (GH_CLI_DESCRIPTOR + entry consts)
+├── descriptors.ts                  # the owned gh CLI descriptor (GH_CLI_DESCRIPTOR, table-owned flag entries)
 ├── descriptors.test.ts             # descriptor value pin (#61 acceptance)
 ├── helpers/
 │   ├── body-strip.ts                # the pinned perl body-strip one-liner (leaf)
@@ -227,7 +227,7 @@ When the built-in predicate isn't enough, reach for the exported helpers inside 
 - `unquote(text)` / `argText(ctx)` — low-level walker-word utilities.
 - `ctx.command` (core facade) — `hasFlag` / `getFlagValue` / `getAllFlagValues` / `positionals()` / `isInfoOnly`, bound through the owned gh descriptor; prefer it over hand-rolled argv scans.
 
-The gh descriptor (`GH_CLI_DESCRIPTOR` + the `GH_*_FLAG` entry consts — single source with the flag table) and the content-pattern constants (`CLOSING_KEYWORD`, `ISSUE_REF`, `TITLE_WITH_REF`, `SUBJECT_WITH_REF`, `BODY_WITH_REF`) are exported too — the content patterns are pinned by the unit tests. (The `^gh\s+` anchor family is retired — routing is structural now, closes #55.) The rule objects (`ghRepoFlagBeforeSubcommand`, …), the predicate handlers (`missingVaultBodyFile`, `foreignRepoTarget`, `infoOnly`, `requiresFlagValue`), the `foreignRepoReason` ReasonFn (module-exported from `src/rules/gh-repo-flag-before-subcommand.ts`), and the `repoName` helper (from `src/helpers/repo-name.ts`) are re-exported as well.
+The gh descriptor (`GH_CLI_DESCRIPTOR` — the flag table owns every entry, read via `GH_CLI_DESCRIPTOR.flags.<key>`) and the content-pattern constants (`CLOSING_KEYWORD`, `ISSUE_REF`) are exported too — the content patterns are pinned by the unit tests. (The `^gh\s+` anchor family is retired — routing is structural now, closes #55.) The rule objects (`ghRepoFlagBeforeSubcommand`, …), the predicate handlers (`missingVaultBodyFile`, `foreignRepoTarget`, `infoOnly`, `requiresFlagValue`), the `foreignRepoReason` ReasonFn (module-exported from `src/rules/gh-repo-flag-before-subcommand.ts`), and the `repoName` helper (from `src/helpers/repo-name.ts`) are re-exported as well.
 
 ## Known limitations
 
