@@ -413,4 +413,79 @@ describe("github plugin — foreignRepoTarget (basename match / fail-closed)", (
     });
     assert.equal(await foreignRepoTarget(true, ctx), true);
   });
+
+  it("ACCEPTED EDGE (collision alarm -m): bool-context over-consumption hides --repo", async () => {
+    // `gh pr merge -m --repo=cad0p/foreign`: `-m` is bool under `pr
+    // merge` (`-m/--merge`) but the table resolves takesValue:true
+    // (milestone row — 4 value contexts vs 1 bool, see COLLISION
+    // ALARMS in ../descriptors.ts), so `-m` CONSUMES the attached
+    // `--repo=cad0p/foreign` token as its value → gate is ABSENT →
+    // RELEASE, hiding a foreign target (fail-open-leaning). Control:
+    // bare `gh pr merge --repo=cad0p/foreign` fires. Narrow/rare —
+    // accepted, FOR CORE. Pinned so any silent flip (takesValue,
+    // consumption, hasFlag skip) goes red.
+    const ctx = ctxWith("gh pr merge -m --repo=cad0p/foreign", {
+      remote: "https://github.com/cad0p/pi-steering-github.git",
+    });
+    assert.equal(await foreignRepoTarget(true, ctx), false);
+  });
+
+  it("ACCEPTED EDGE (collision alarm -r): bool-context over-consumption hides --repo", async () => {
+    // `gh pr merge -r --repo=cad0p/foreign`: `-r` is bool under `pr
+    // merge` (`-r/--rebase`) but the table resolves takesValue:true
+    // (reviewer + remote rows, see COLLISION ALARMS in
+    // ../descriptors.ts), so `-r` CONSUMES the attached
+    // `--repo=cad0p/foreign` token → ABSENT → RELEASE, hiding a
+    // foreign target (fail-open-leaning). Control: bare `--repo=`
+    // form fires. Narrow — accepted, FOR CORE. Red on silent flip.
+    const ctx = ctxWith("gh pr merge -r --repo=cad0p/foreign", {
+      remote: "https://github.com/cad0p/pi-steering-github.git",
+    });
+    assert.equal(await foreignRepoTarget(true, ctx), false);
+  });
+
+  it("ACCEPTED EDGE (collision alarm -s): bool-context over-consumption hides --repo", async () => {
+    // `gh pr merge -s --repo=cad0p/foreign`: `-s` is bool under `pr
+    // merge` (`-s/--squash`) but the table resolves takesValue:true
+    // (source row, see COLLISION ALARMS in ../descriptors.ts), so
+    // `-s` CONSUMES the attached `--repo=cad0p/foreign` token →
+    // ABSENT → RELEASE, hiding a foreign target (fail-open-leaning).
+    // Narrow — accepted, FOR CORE. Red on silent flip.
+    const ctx = ctxWith("gh pr merge -s --repo=cad0p/foreign", {
+      remote: "https://github.com/cad0p/pi-steering-github.git",
+    });
+    assert.equal(await foreignRepoTarget(true, ctx), false);
+  });
+
+  it("ACCEPTED EDGE (collision alarm -d): bool-context over-consumption hides --repo", async () => {
+    // `gh pr merge -d --repo=cad0p/foreign`: `-d` is bool under `pr
+    // merge` (`-d/--delete-branch`) and under `pr create`
+    // (`-d/--draft`) but the table resolves takesValue:true
+    // (description row — free-text is the most hijack-prone value,
+    // see COLLISION ALARMS in ../descriptors.ts), so `-d` CONSUMES
+    // the attached `--repo=cad0p/foreign` token → ABSENT → RELEASE,
+    // hiding a foreign target (fail-open-leaning). Narrow —
+    // accepted, FOR CORE. Red on silent flip.
+    const ctx = ctxWith("gh pr merge -d --repo=cad0p/foreign", {
+      remote: "https://github.com/cad0p/pi-steering-github.git",
+    });
+    assert.equal(await foreignRepoTarget(true, ctx), false);
+  });
+
+  it("ACCEPTED EDGE (collision alarm -h): bool-context over-consumption hides --repo", async () => {
+    // `gh pr merge -h --repo=cad0p/foreign`: `-h` is bool help but
+    // the table resolves takesValue:true (homepage row — the help
+    // entry keeps `-h` as a bool spelling but consumption derives
+    // true from the homepage row, see COLLISION ALARMS in
+    // ../descriptors.ts), so `-h` CONSUMES the attached
+    // `--repo=cad0p/foreign` token → ABSENT → RELEASE, hiding a
+    // foreign target (fail-open-leaning). Predicate-level only: real
+    // help forms (`gh … -h`) still exempt via the rule's token-level
+    // `infoOnly` leaf, which uses its own bool entries, not table
+    // consumption. Accepted, FOR CORE. Red on silent flip.
+    const ctx = ctxWith("gh pr merge -h --repo=cad0p/foreign", {
+      remote: "https://github.com/cad0p/pi-steering-github.git",
+    });
+    assert.equal(await foreignRepoTarget(true, ctx), false);
+  });
 });
