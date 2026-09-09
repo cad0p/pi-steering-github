@@ -46,11 +46,11 @@
 		"@cad0p/pi-steering-flags": "0.1.1-20260904.0"
 	},
 	"peerDependencies": {
-		"@cad0p/pi-steering": "0.2.0-20260904.3"
+		"@cad0p/pi-steering": "0.2.0-20260908.1"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.3.14",
-		"@cad0p/pi-steering": "0.2.0-20260904.3",
+		"@cad0p/pi-steering": "0.2.0-20260908.1",
 		"@earendil-works/pi-coding-agent": "^0.84.1",
 		"@types/node": "^22.19.0",
 		"typescript": "^5.8"
