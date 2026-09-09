@@ -10,9 +10,11 @@
  * — the commit body is optional at merge (relaxed from BOTH channels
  * on 2026-08-16, user decision).
  *
- * Fully declarative gate — zero condition code (issue #23). The two
- * leaves compose as an AND of independent predicates shipped by
- * `@cad0p/pi-steering-flags`:
+ * Fully declarative gate — zero condition code (issue #23).
+ * `command: "gh"` routes, the `subcommand:` sequence scopes to
+ * `pr merge` (a gate-released flag-first merge lands on this policy
+ * instead of bypassing it), and two leaves compose as an AND of
+ * independent predicates shipped by `@cad0p/pi-steering-flags`:
  *
  * - `not.infoOnly(["-h"])` exempts read-only introspection
  *   (--help/--version defaults plus GitHub's additive -h;
@@ -22,11 +24,6 @@
  *   `--subject`/`-t` aliases; absent, valueless, or non-matching →
  *   fires (fail-closed).
  *
- * The anchor matches ANY leading-flag position (#41, shared
- * `LEADING_FLAG_PAIRS` unit) — a gate-released flag-first merge lands
- * on this policy instead of bypassing it (the one-pair class had
- * escaped since #39).
- *
  * See those predicates' docs for the full semantics and the accepted
  * exact-quoted-info-token limitation.
  *
@@ -34,17 +31,22 @@
  */
 
 import type { Rule } from "@cad0p/pi-steering";
-import { ISSUE_REF, PR_MERGE_ANCHOR } from "../helpers/patterns.ts";
+import { GH_CLI_DESCRIPTOR } from "../descriptors.ts";
+import { ISSUE_REF } from "../helpers/patterns.ts";
 
 export const prMergeNeedsClosingKeywords = {
   name: "pr-merge-needs-closing-keywords",
   tool: "bash",
-  field: "command",
-  pattern: PR_MERGE_ANCHOR,
+  command: "gh",
   when: {
+    subcommand: { anyOf: [["pr", "merge"]], onUnknown: "allow" },
     not: { infoOnly: { extraFlags: ["-h"] } },
     requiresFlagValue: {
-      flags: ["--subject", "-t"],
+      // Subject aliases derived from the owning table entry (never a
+      // hand-built literal — requiresFlagValue takes spellings, so
+      // the entry's `aliases` are spread here; a table change flows
+      // through without a second edit site).
+      flags: [...GH_CLI_DESCRIPTOR.flags.subject.aliases],
       matches: new RegExp(ISSUE_REF, "i"),
     },
   },

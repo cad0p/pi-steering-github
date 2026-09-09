@@ -63,17 +63,13 @@
  */
 
 import type { Plugin, PredicateShape, Rule } from "@cad0p/pi-steering";
-// Side-effect pull of the flags plugin's `PiSteeringPredicates` registry
-// augmentation (`infoOnly`, `requiresFlagValue` leaves used below) —
-// the flags package's documented import-side-effect contract. The
-// `hasFlag`/`getFlagValue` escape-hatch helpers now come from core
-// (P3), so without this the build — which excludes `*.test.ts`, the
-// only remaining imports of the flags package — would lose the
-// predicate names. The module itself is side-effect-free (predicate
-// definitions only); registration still requires listing `flagsPlugin`
-// in the user config's `plugins`.
-import "@cad0p/pi-steering-flags";
-import type { ForeignRepoTargetArgs } from "./predicates/foreign-repo-target.ts";
+import {
+  type InfoOnlyArgs,
+  infoOnly,
+  type RequiresFlagValueArgs,
+  requiresFlagValue,
+} from "@cad0p/pi-steering-flags";
+import { GH_CLI_DESCRIPTOR } from "./descriptors.ts";
 import { foreignRepoTarget } from "./predicates/foreign-repo-target.ts";
 import { missingVaultBodyFile } from "./predicates/missing-vault-body-file.ts";
 import { ghRepoCreateNeedsSeed } from "./rules/gh-repo-create-needs-seed.ts";
@@ -101,45 +97,62 @@ declare global {
      * FOREIGN repository (#39: PRESENCE of the flag, not its
      * position): the effective `-R`/`--repo` target's basename
      * differs from the cwd repo's basename. Backs
-     * `gh-repo-flag-before-subcommand`.
+     * `gh-repo-flag-before-subcommand`. Flag access reads through
+     * the bound `ctx.command` facade (glue + consumption from this
+     * plugin's OWNED gh descriptor — #61).
      *
-     * Fail-closed doctrine: an unparsable target (now only a
-     * valueless or empty-valued LAST alias occurrence — glued short
-     * forms resolve via `{ gluedShorts: ["R"] }`, upstream
-     * cad0p/pi-steering-flags#11), a walker-unknown cwd, or an
-     * unresolvable repo all BLOCK.
-     * Released without consulting any knob: invocations carrying NO
-     * `-R`/`--repo` token anywhere (they fall through to the
-     * per-subcommand rules), and slashless remote-name forms (`-R
-     * upstream`).
+     * Fail-closed doctrine: an unparsable target (a valueless or
+     * empty-valued LAST alias occurrence), a walker-unknown cwd, or
+     * an unresolvable repo all BLOCK. Released without consulting
+     * any knob: invocations carrying NO `-R`/`--repo` anywhere (they
+     * fall through to the per-subcommand rules), and slashless
+     * remote-name forms (`-R upstream`).
      *
      * Basename policy = fork→upstream tolerance (#19), hardcoded —
      * basename EQUALITY allows `gh -R upstream/foo pr create` from
      * inside the `me/foo` clone; there is deliberately no `matchBy`
      * / `flags` arg, the policy is documented, not configurable.
      *
-     * Boolean-bare shape (the `infoOnly` precedent): bare `true` ≡
-     * spread `{}` — both enable the gate and run the argv logic
-     * (both verified typechecking); bare `false` NEVER fires
-     * (handlers receive the leaf value verbatim, so the handler's
-     * step-0 `args === false` guard makes a disabled config inert).
+     * Boolean-leaf shape (the `infoOnly` precedent — core
+     * `BooleanLeafArgs`): bare `true` (or `{ value: true }`) enables
+     * the gate and runs the argv logic; bare `false` NEVER fires
+     * (disables the gate — deliberately NOT inverted).
      */
-    foreignRepoTarget: PredicateShape<boolean, ForeignRepoTargetArgs>;
+    foreignRepoTarget: PredicateShape<boolean>;
+    /**
+     * `when.infoOnly` — fires when the command IS an info-only
+     * invocation (`--help` / `--version` + additive `extraFlags`).
+     * Provided by `@cad0p/pi-steering-flags` (single source of truth
+     * — re-exported here so this plugin's rules and existing user
+     * configs keep the same key). Carve-out idiom:
+     * `not: { infoOnly: … }` ALLOWS info-only invocations.
+     */
+    infoOnly: PredicateShape<boolean, InfoOnlyArgs>;
+    /**
+     * `when.requiresFlagValue` — fires when the LAST-wins value of
+     * any listed alias is absent, valueless, or fails `matches`.
+     * Provided by `@cad0p/pi-steering-flags` (single source of truth
+     * — same key, same spread-only shape).
+     */
+    requiresFlagValue: PredicateShape<RequiresFlagValueArgs>;
   }
 }
 
 /**
  * The rules roster, in first-match-wins order (the engine routes on
- * the first matching rule): `pr-body-from-vault-file` FIRST so the
- * agent writes the vault body file before fiddling with keywords,
- * then the issue-link rule, then merge, then the issue body-file
- * rule, then `gh-repo-create-needs-seed` LAST — appended, never
- * reordered. All five pattern anchors share the #41 leading-flag
- * unit, but they stay pairwise disjoint on the SUBCOMMAND token
- * (`pr|issue …` vs `repo …`), so first-match routing is unaffected.
- * Reordering for stylistic reasons changes which rule an agent sees
- * when several match; pinned via `src/index.test.ts` (roster order)
- * and asserted end-to-end in `src/integration.test.ts`.
+ * the first matching rule): `gh-repo-flag-before-subcommand` FIRST
+ * so the foreign redirect precedes every per-subcommand policy, then
+ * `pr-body-from-vault-file` so the agent writes the vault body file
+ * before fiddling with keywords, then the issue-link rule, then
+ * merge, then the issue body-file rule, then
+ * `gh-repo-create-needs-seed` LAST — appended, never reordered. The
+ * `subcommand:` sets overlap by design (the foreign gate covers every
+ * gated `pr|issue` sequence) — correctness rests on this order plus
+ * release fall-through, not on disjointness. The `repo create|new`
+ * sequences stay disjoint from the `pr|issue` ones. Reordering for
+ * stylistic reasons changes which rule an agent sees when several
+ * match; pinned via `src/index.test.ts` (roster order) and asserted
+ * end-to-end in `src/integration.test.ts`.
  */
 export const rules = [
   ghRepoFlagBeforeSubcommand,
@@ -159,22 +172,43 @@ export const rules = [
  * `defineConfig`'s plugin-name / predicate-name inference (typo
  * checking on `disabledRules` / `disabledPlugins`).
  *
- * Rule order comes from `rules` (first-match-wins): the vault
- * body-file rule runs FIRST so the agent writes the body file before
- * fiddling with keywords, then the issue-link rule, then merge, then
- * the issue body-file rule, then `gh-repo-create-needs-seed` (no
- * anchor overlap — `gh repo …` shares no prefix with the
- * `gh pr|issue …` anchors). See the `rules` doc comment above for
- * the rationale.
+ * Rule order comes from `rules` (first-match-wins): the foreign
+ * redirect runs FIRST, then the vault body-file rule so the agent
+ * writes the body file before fiddling with keywords, then the
+ * issue-link rule, then merge, then the issue body-file rule, then
+ * `gh-repo-create-needs-seed` (its `repo create|new` sequences stay
+ * disjoint from the `pr|issue` ones). See the `rules` doc comment
+ * above for the rationale.
  */
 export const githubPlugin = {
   name: "github",
-  predicates: { missingVaultBodyFile, foreignRepoTarget },
+  // Owns the gh CLI descriptor (closes #61): per-binary argv
+  // knowledge for every `command: "gh"` rule — subcommand
+  // extraction, the `flag:` leaf, and the bound `ctx.command`
+  // facade all resolve through this table. Referenced by name
+  // (never inlined) so hover rides on the const.
+  cliDescriptors: { gh: GH_CLI_DESCRIPTOR },
+  // `infoOnly` + `requiresFlagValue` are re-adopted from
+  // `@cad0p/pi-steering-flags` (single source of truth — same `when`
+  // key names, so rules and user configs are untouched).
+  predicates: {
+    missingVaultBodyFile,
+    foreignRepoTarget,
+    infoOnly,
+    requiresFlagValue,
+  },
   rules,
 } as const satisfies Plugin;
 
 export default githubPlugin;
 
+export {
+  type InfoOnlyArgs,
+  infoOnly,
+  type RequiresFlagValueArgs,
+  requiresFlagValue,
+} from "@cad0p/pi-steering-flags";
+export { GH_CLI_DESCRIPTOR } from "./descriptors.ts";
 export {
   renderDegradedReason,
   renderDiagnosedReason,
@@ -196,27 +230,17 @@ export {
   unquote,
 } from "./helpers/pattern-args.ts";
 // Named re-exports for consumers that want to pick pieces: the
-// shipped rules (or the `rules` roster itself), the pattern constants
-// (pinned by the unit tests), the predicate handler, and the arg
-// helpers (`findBodyFileValue` / `parseBodyFileArg` parse the
+// shipped rules (or the `rules` roster itself), the gh descriptor
+// (the table owns every flag entry — read via
+// `GH_CLI_DESCRIPTOR.flags.<key>`), the content-pattern constants
+// (pinned by the unit tests), the predicate handler, and
+// the arg helpers (`findBodyFileValue` / `parseBodyFileArg` parse the
 // pinned perl substitution form) for `when.condition` escape-hatch
 // use.
 export {
-  BODY_WITH_REF,
   CLOSING_KEYWORD,
-  ISSUE_BODY_ANCHOR,
   ISSUE_REF,
-  PR_BODY_ANCHOR,
-  PR_CREATE_ANCHOR,
-  PR_MERGE_ANCHOR,
-  REPO_CREATE_ANCHOR,
-  REPO_CREATE_PATTERN,
-  REPO_CREATE_SEED_FLAG,
-  REPO_FLAG_ANCHOR,
-  SUBJECT_WITH_REF,
-  TITLE_WITH_REF,
 } from "./helpers/patterns.ts";
-export type { ForeignRepoTargetArgs } from "./predicates/foreign-repo-target.ts";
 export { foreignRepoTarget } from "./predicates/foreign-repo-target.ts";
 export type {
   BodyFileDiagnosis,

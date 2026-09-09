@@ -39,16 +39,15 @@ import {
   loadHarness,
   mockExtensionContext,
 } from "@cad0p/pi-steering/testing";
-import { flagsPlugin } from "@cad0p/pi-steering-flags";
 import type { ExecResult } from "@earendil-works/pi-coding-agent";
 import { BODY_STRIP } from "./helpers/body-strip.ts";
 import { githubPlugin } from "./index.ts";
 
-// flagsPlugin supplies the declarative when leaves
-// (`not.infoOnly`, `requiresFlagValue`) that pr-merge-needs-closing-
-// keywords composes — without it those keys hit the evaluator's
-// UnknownPredicateError at evaluation time.
-const config = defineConfig({ plugins: [flagsPlugin, githubPlugin] });
+// The declarative when leaves (`not.infoOnly`, `requiresFlagValue`)
+// that pr-merge-needs-closing-keywords composes are provided by
+// `@cad0p/pi-steering-flags` (re-adopted dep — single source of truth),
+// so the config lists githubPlugin alone.
+const config = defineConfig({ plugins: [githubPlugin] });
 
 /** Fixture dirs created per test, cleaned up after. */
 const fixtures: string[] = [];
@@ -258,7 +257,11 @@ describe("github plugin — shape", () => {
     );
     for (const r of plugin?.rules ?? []) {
       assert.equal(r.tool, "bash");
-      assert.equal(r.field, "command");
+      if (r.tool === "bash") {
+        assert.equal(r.command, "gh");
+        assert.ok(!("field" in r), `${r.name} must not carry field:`);
+        assert.ok(!("pattern" in r), `${r.name} must not carry pattern:`);
+      }
       assert.ok(!("noOverride" in r), `${r.name} must be strict`);
     }
     assert.equal(typeof plugin?.predicates?.missingVaultBodyFile, "function");
@@ -324,6 +327,41 @@ describe("github plugin — PR rules (issue-link + vault body-file policy)", () 
       host,
     );
     assert.equal(block, false, `expected allow, got block by ${rule}`);
+  });
+
+  it("#44: label/title edits pass without the substitution (no body write)", async () => {
+    // The pi#8845 live over-block: `gh issue edit 8845 --add-label
+    // bug` only touches labels — the vault-body policy applies to an
+    // edit solely when a body-affecting flag is present.
+    for (const cmd of [
+      "gh issue edit 8845 --add-label bug",
+      'gh pr edit 46 --title "feat: x (closes #12)"',
+    ]) {
+      const { block, rule } = await evaluateBash(makeFixtureDir(), cmd, host);
+      assert.equal(
+        block,
+        false,
+        `expected allow for: ${cmd} (block by ${rule})`,
+      );
+    }
+  });
+
+  it("#44: body-carrying edits stay gated (inline --body / direct path)", async () => {
+    const inline = await evaluateBash(
+      makeFixtureDir(),
+      `gh issue edit 29 --body "plain text"`,
+      host,
+    );
+    assert.equal(inline.block, true, "expected block");
+    assert.equal(inline.rule, "issue-body-from-vault-file");
+    const fx = makeVaultRepoFixture(repo);
+    const direct = await evaluateBash(
+      makeFixtureDir(),
+      `gh pr edit 46 --body-file "${fx.prBodyFile}"`,
+      host,
+    );
+    assert.equal(direct.block, true, "expected block");
+    assert.equal(direct.rule, "pr-body-from-vault-file");
   });
 
   it("allows the glued --body-file=<(…) form (walker-split into two words)", async () => {
@@ -822,6 +860,42 @@ describe("github plugin — PR rules (issue-link + vault body-file policy)", () 
       host,
     );
     assert.equal(blockClose, false, `expected allow, got block by ${rule}`);
+  });
+
+  it("command-first routing boundaries (structural — no regex surface)", async () => {
+    // Non-gated subcommands stay ungated EVEN with a foreign -R: the
+    // gate's subcommand set has no [pr, view] / [issue, list] member.
+    for (const cmd of [
+      "gh -R cad0p/other pr view 12",
+      "gh -R cad0p/other issue list",
+      "gh -R cad0p/other issue close 3",
+      // Typo subcommands never match a two-word sequence exactly.
+      "gh pr created --title t",
+      "gh pr merged",
+      // Basename-exact routing: echo prefixes never reach gh rules.
+      "echo gh pr merge --squash",
+      "echo gh repo create x",
+      // Bare introspection carries no subcommand (extraction unknown
+      // → onUnknown allow on every rule).
+      "gh --help",
+      "gh --version",
+    ]) {
+      const { block, rule } = await evaluateBash(makeFixtureDir(), cmd, host);
+      assert.equal(
+        block,
+        false,
+        `expected allow for: ${cmd} (block by ${rule})`,
+      );
+    }
+    // Case-exact routing: `GH` is a different basename (runtime
+    // command-not-found) — the old /i anchors routed it, command:
+    // does not. Accepted delta, pinned.
+    const upper = await evaluateBash(
+      makeFixtureDir(),
+      "GH pr merge --squash",
+      host,
+    );
+    assert.equal(upper.block, false, `expected allow, got block`);
   });
 });
 

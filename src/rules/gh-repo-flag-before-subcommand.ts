@@ -7,28 +7,29 @@
  * to the foreign repo's own config: run a foreign subagent
  * maintainer loop until good, then cd into the foreign repo and
  * target it from there. This is the ENTRY step of the foreign flow —
- * FIRST in the roster: its router anchor OVERLAPS the pr/issue
- * body/create/merge anchors (it routes gated subcommands with any
- * number of leading flag(+value) pairs — both `-R` positions, #39;
- * unbounded pair count, #41), so correctness
- * rests on the evaluator's first-firing-rule-wins ordering plus
- * RELEASE FALL-THROUGH — the `foreignRepoTarget` predicate releases
- * every command without a foreign target and the per-subcommand
- * rules evaluate normally — not on anchor disjointness.
+ * FIRST in the roster: its `subcommand:` set OVERLAPS the pr/issue
+ * body/create/merge sets (every gated subcommand routes here in ANY
+ * flag position — both `-R` positions since #39, unbounded leading
+ * pairs since #41, now structural via the descriptor's consuming-flag
+ * arity instead of the retired `LEADING_FLAG_PAIRS` shape router),
+ * so correctness rests on the evaluator's first-firing-rule-wins
+ * ordering plus RELEASE FALL-THROUGH — the `foreignRepoTarget`
+ * predicate releases every command without a foreign target and the
+ * per-subcommand rules evaluate normally — not on subcommand
+ * disjointness.
  *
  * Fires on `pr create|new|edit|merge` and `issue create|edit` only
  * (`repo create|new` is excluded by design — nothing to cd into, the
  * target is the positional argument; that exclusion is about THIS
- * foreign gate only and is NOT a policy bypass: the seed rule's
- * widened anchor gates repo-create forms. Read-only forms stay
- * allowed).
- * The anchor is a shape router; repo-targeting is decided by
- * PRESENCE of `-R/--repo` (#39): absent → release (fall-through);
- * present-but-unparsable → fail-closed block; slashless `-R upstream`
- * → release (fork remote-name form).
+ * foreign gate only and is NOT a policy bypass: the seed rule gates
+ * repo-create forms. Read-only forms stay allowed).
+ * Repo-targeting is decided by PRESENCE of `-R/--repo` (#39): absent
+ * → release (fall-through); present-but-unparsable → fail-closed
+ * block; slashless `-R upstream` → release (fork remote-name form).
  *
- * Fully declarative gate — zero condition code (issue #36). Two
- * leaves compose as an AND of independent registered predicates:
+ * Fully declarative gate — zero condition code (issue #36). The
+ * `subcommand:` leaf routes, two leaves compose as an AND of
+ * independent registered predicates:
  *
  * - `not.infoOnly({ extraFlags: ["-h"] })` exempts read-only
  *   introspection: the flags plugin's `--help`/`--version` defaults
@@ -65,15 +66,24 @@
  */
 
 import type { PredicateContext, Rule } from "@cad0p/pi-steering";
-import { getFlagValue } from "@cad0p/pi-steering";
-import { REPO_FLAG_ANCHOR } from "../helpers/patterns.ts";
+import { effectiveRepoTarget } from "../predicates/foreign-repo-target.ts";
 
 export const ghRepoFlagBeforeSubcommand = {
   name: "gh-repo-flag-before-subcommand",
   tool: "bash",
-  field: "command",
-  pattern: REPO_FLAG_ANCHOR,
+  command: "gh",
   when: {
+    subcommand: {
+      anyOf: [
+        ["pr", "create"],
+        ["pr", "new"],
+        ["pr", "edit"],
+        ["pr", "merge"],
+        ["issue", "create"],
+        ["issue", "edit"],
+      ],
+      onUnknown: "allow",
+    },
     not: { infoOnly: { extraFlags: ["-h"] } },
     foreignRepoTarget: true,
   },
@@ -83,33 +93,27 @@ export const ghRepoFlagBeforeSubcommand = {
 /**
  * The dynamic block reason for `gh-repo-flag-before-subcommand`:
  * renders the EFFECTIVE `-R`/`--repo` target via the SAME
- * `getFlagValue` call the predicate's verdict used — single source of
- * truth, so the redirect always names where to cd (LAST-wins across
- * the aliases, glue-aware). As-typed flag-echo fidelity is dropped
- * deliberately (#39): a blocked command is never re-run verbatim;
- * the reader needs WHERE to cd, and an unparsable target renders the
- * honest fallback phrase instead of echoing a flag spelling. Never
- * throws — both helpers are total functions over argv.
+ * `effectiveRepoTarget` call the predicate's verdict used — single source
+ * of truth, so the redirect always names where to cd (LAST-wins across the
+ * aliases, glue-aware, OTHER-consumed values skipped). As-typed flag-echo
+ * fidelity is dropped deliberately (#39): a blocked command is never re-run
+ * verbatim; the reader needs WHERE to cd, and an unparsable target
+ * renders the honest fallback phrase instead of echoing a flag
+ * spelling. Never throws — the helper is total over argv.
  */
 export function foreignRepoReason(ctx: PredicateContext): string {
-  const words = ctx.input.args ?? [];
-  const target = getFlagValue(words, ["-R", "--repo"], {
-    gluedShorts: ["R"],
-  });
+  const target = effectiveRepoTarget(ctx);
   const via =
     target !== null && target !== ""
       ? `via ${target}`
       : "via an unresolvable -R/--repo";
-  // The subcommand is the FIRST exact `pr`/`issue` TOKEN in the argv.
-  // Exact tokens only: the walker keeps quoted values as single words,
-  // so MULTI-WORD values like "fix pr bug" can never match. (Accepted
-  // display-only limitation: a single-word root-flag value that is
-  // exactly `pr`/`issue` could still mislabel the PR/issue noun —
-  // contrived, verdict unaffected.)
-  const subWord = words.find(
-    (w) => (w?.text ?? "") === "pr" || (w?.text ?? "") === "issue",
-  );
-  const sub = subWord?.text ?? "";
+  // The subcommand is the FIRST `pr`/`issue` positional. The facade's
+  // positional view already skips declared consuming-flag values, so
+  // a single-word `--title pr` value can no longer mislabel the noun
+  // (the old argv scan's accepted display-only limitation, narrowed
+  // to undeclared-flag values only).
+  const sub =
+    ctx.command.positionals().find((w) => w === "pr" || w === "issue") ?? "";
   const what = sub === "pr" ? "PR" : "issue";
   return (
     `The ${what} you're targeting ${via} belongs to a foreign repo.\n` +

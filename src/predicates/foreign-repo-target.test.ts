@@ -19,8 +19,49 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { PredicateContext } from "@cad0p/pi-steering";
+import type { PredicateContext, PredicateWord } from "@cad0p/pi-steering";
+import { mockContext } from "@cad0p/pi-steering/testing";
+import { GH_CLI_DESCRIPTOR } from "../descriptors.ts";
 import { foreignRepoTarget } from "./foreign-repo-target.ts";
+
+/**
+ * Split a command line the way the walker would: whitespace separates
+ * tokens outside quotes; `"…"` / `'…'` groups stay ONE word (text
+ * keeps the quotes, value is the resolved inner text — exactly what
+ * `ctx.command`'s quote-aware reads see). This replaces the old
+ * space-split helper, whose fragments (`"-Rfoo/bar`, `ref"`) only
+ * approximated quoted values.
+ */
+function splitWords(command: string): PredicateWord[] {
+  const out: PredicateWord[] = [];
+  let text = "";
+  let value = "";
+  let quote: string | null = null;
+  const push = () => {
+    if (text !== "") {
+      out.push({ value, text, rawText: text, pos: 0, end: text.length });
+      text = "";
+      value = "";
+    }
+  };
+  for (const ch of command) {
+    if (quote !== null) {
+      text += ch;
+      if (ch === quote) quote = null;
+      else value += ch;
+    } else if (ch === '"' || ch === "'") {
+      quote = ch;
+      text += ch;
+    } else if (/\s/.test(ch)) {
+      push();
+    } else {
+      text += ch;
+      value += ch;
+    }
+  }
+  push();
+  return out;
+}
 
 describe("github plugin — foreignRepoTarget (basename match / fail-closed)", () => {
   // Stub ctx with walker args + a repoName-resolving cwd. `repoName`
@@ -33,30 +74,31 @@ describe("github plugin — foreignRepoTarget (basename match / fail-closed)", (
     command: string,
     opts: { cwd?: string; remote?: string | null } = {},
   ): PredicateContext {
-    const cwd = opts.cwd ?? "/home/me/pi-steering-github";
-    const args = command.split(/\s+/).map((text) => ({ text }));
     const exec =
       opts.remote === null
         ? () =>
             Promise.resolve({
               stdout: "",
               stderr: "",
-              code: 1,
-              killed: false,
+              exitCode: 1,
             })
-        : (_cmd: string, _a: string[]) =>
+        : (_cmd: string, _a: readonly string[]) =>
             Promise.resolve({
               stdout: opts.remote ?? "",
               stderr: "",
-              code: 0,
-              killed: false,
+              exitCode: 0,
             });
-    return {
-      cwd,
-      tool: "bash",
-      input: { args },
+    return mockContext({
+      cwd: opts.cwd ?? "/home/me/pi-steering-github",
+      input: {
+        tool: "bash",
+        command,
+        basename: "gh",
+        args: splitWords(command).slice(1),
+      },
+      descriptors: { gh: GH_CLI_DESCRIPTOR },
       exec,
-    } as unknown as PredicateContext;
+    });
   }
 
   it("bare false never fires (step-0 guard, even on would-block argv)", async () => {
@@ -152,11 +194,8 @@ describe("github plugin — foreignRepoTarget (basename match / fail-closed)", (
   });
 
   it("releases own-repo glued short form -Rcad0p/x (basename match)", async () => {
-    // Glue-aware resolution (upstream cad0p/pi-steering-flags#11,
-    // `{ gluedShorts: ["R"] }` opt-in): `-Rcad0p/pi-steering-github`
-    // resolves → basename equality → release. The pre-#36 parser
-    // allowed this too — the #36-era fail-closed over-block delta
-    // converges back to zero.
+    // Table-derived glue for `R`: `-Rcad0p/pi-steering-github`
+    // resolves → basename equality → release.
     const ctx = ctxWith("gh -Rcad0p/pi-steering-github pr create --title t", {
       remote: "https://github.com/cad0p/pi-steering-github.git",
     });
@@ -223,33 +262,35 @@ describe("github plugin — foreignRepoTarget (basename match / fail-closed)", (
     assert.equal(await foreignRepoTarget(true, ctx), true);
   });
 
-  it("accepted limitation: slashless lookalike value word releases via step 4", async () => {
-    // Declaring ["R"] decomposes ANY `-R<rest>` word at any position:
-    // a quoted body value like `-m "-Rebased onto main"` (walker keeps
-    // it one word; the helper's space-split below approximates it)
-    // hijacks resolution to the slashless target "ebased" → step-4
-    // RELEASE — so a body word can never cause a false block. (It can
-    // MASK a real foreign target behind it — heuristic discipline,
-    // same class as the fork→upstream tolerance.)
-    const ctx = ctxWith("gh -Rcad0p/other pr edit 46 -m -Rebased onto main", {
+  it("BEHAVIOR DELTA (consumption completeness): slashless -m value no longer masks (was release)", async () => {
+    // FLIP from the old "accepted limitation" release pin: `-m/--milestone`
+    // is now tabled takesValue:true (`gh help pr edit` shows
+    // `-m, --milestone name`), so the quoted milestone value
+    // `"-Rebased onto main"` is CONSUMED as `-m`'s value and hidden from
+    // `-R` resolution — the leading foreign `-Rcad0p/other` wins → FIRE.
+    // The old release was the hijack hole (a slashless body word masking a
+    // foreign target behind step-4 release); consumption completeness closes
+    // it. Fail-closed direction, pinned so it cannot regress silently.
+    const ctx = ctxWith('gh -Rcad0p/other pr edit 46 -m "-Rebased onto main"', {
       remote: "https://github.com/cad0p/pi-steering-github.git",
     });
-    assert.equal(await foreignRepoTarget(true, ctx), false);
+    assert.equal(await foreignRepoTarget(true, ctx), true);
   });
 
-  it("accepted limitation: slashful lookalike value word over-blocks", async () => {
-    // The dangerous twin of the pin above: a SLASHFUL body value
-    // (`-m "-Rfoo/bar ref"`) hijacks resolution to `foo/bar` →
-    // basename mismatch → FIRE despite the leading own-repo target.
-    // Fail-closed direction, accepted under the ShellCheck-norm
-    // opt-in contract (flags#11 semantics 1+4).
+  it("BEHAVIOR DELTA (consumption completeness): slashful -m value no longer over-blocks (was fire)", async () => {
+    // FLIP from the old over-block pin: with `-m` consuming, the quoted
+    // `"-Rfoo/bar ref"` is `-m`'s milestone VALUE (hidden), not an `-R`
+    // target — resolution sees only the leading own-repo target → basename
+    // match → RELEASE. The old fire was the hijack hole's fail-closed twin
+    // (a slashful body word hijacking resolution); hiding is the correct,
+    // `--help`-faithful verdict. Pinned so the flip cannot change silently.
     const ctx = ctxWith(
-      "gh -Rcad0p/pi-steering-github pr edit 46 -m -Rfoo/bar ref",
+      'gh -Rcad0p/pi-steering-github pr edit 46 -m "-Rfoo/bar ref"',
       {
         remote: "https://github.com/cad0p/pi-steering-github.git",
       },
     );
-    assert.equal(await foreignRepoTarget(true, ctx), true);
+    assert.equal(await foreignRepoTarget(true, ctx), false);
   });
 
   it("BEHAVIOR DELTA (#36 delta 1): bare --version leaves the handler indifferent", async () => {
@@ -348,17 +389,17 @@ describe("github plugin — foreignRepoTarget (basename match / fail-closed)", (
     assert.equal(await foreignRepoTarget(true, ctx), true);
   });
 
-  it("accepted limitation: -R-shaped VALUE word glues and over-blocks (subcommand-first)", async () => {
-    // `gh -v pr merge -m "-Rfoo/bar ref"`: pre-#39 this released at
-    // the shape check (first flag `-v` is not the repo family); now
-    // ANY `-R`-shaped word makes the gate PRESENT, and glue-aware
-    // resolution picks the slashful `foo/bar` → basename mismatch →
-    // fire. Same accepted over-block class as the flags#11 opt-in,
-    // newly reachable from subcommand-first shapes.
-    const ctx = ctxWith("gh -v pr merge -m -Rfoo/bar ref", {
+  it("BEHAVIOR DELTA (consumption completeness): -R-shaped -m VALUE no longer fires (was over-block)", async () => {
+    // FLIP from the old subcommand-first over-block pin: `gh -v pr merge
+    // -m "-Rfoo/bar ref"` carries NO `-R/--repo` flag — the `-Rfoo/bar ref`
+    // word is `-m`'s consumed VALUE now (`-m/--milestone` takesValue:true;
+    // `-m/--merge` bool collision resolved value-side, see descriptor
+    // ALARMS), so the gate is ABSENT → release. The old fire read a VALUE
+    // word as a flag (hijack-leaning); hiding is `--help`-faithful.
+    const ctx = ctxWith('gh -v pr merge -m "-Rfoo/bar ref"', {
       remote: "https://github.com/cad0p/pi-steering-github.git",
     });
-    assert.equal(await foreignRepoTarget(true, ctx), true);
+    assert.equal(await foreignRepoTarget(true, ctx), false);
   });
 
   it("BEHAVIOR DELTA (#39): non-repo leading flag + later real --repo now blocks", async () => {
@@ -371,5 +412,80 @@ describe("github plugin — foreignRepoTarget (basename match / fail-closed)", (
       remote: "https://github.com/cad0p/pi-steering-github.git",
     });
     assert.equal(await foreignRepoTarget(true, ctx), true);
+  });
+
+  it("ACCEPTED EDGE (collision alarm -m): bool-context over-consumption hides --repo", async () => {
+    // `gh pr merge -m --repo=cad0p/foreign`: `-m` is bool under `pr
+    // merge` (`-m/--merge`) but the table resolves takesValue:true
+    // (milestone row — 4 value contexts vs 1 bool, see COLLISION
+    // ALARMS in ../descriptors.ts), so `-m` CONSUMES the attached
+    // `--repo=cad0p/foreign` token as its value → gate is ABSENT →
+    // RELEASE, hiding a foreign target (fail-open-leaning). Control:
+    // bare `gh pr merge --repo=cad0p/foreign` fires. Narrow/rare —
+    // accepted, FOR CORE. Pinned so any silent flip (takesValue,
+    // consumption, hasFlag skip) goes red.
+    const ctx = ctxWith("gh pr merge -m --repo=cad0p/foreign", {
+      remote: "https://github.com/cad0p/pi-steering-github.git",
+    });
+    assert.equal(await foreignRepoTarget(true, ctx), false);
+  });
+
+  it("ACCEPTED EDGE (collision alarm -r): bool-context over-consumption hides --repo", async () => {
+    // `gh pr merge -r --repo=cad0p/foreign`: `-r` is bool under `pr
+    // merge` (`-r/--rebase`) but the table resolves takesValue:true
+    // (reviewer + remote rows, see COLLISION ALARMS in
+    // ../descriptors.ts), so `-r` CONSUMES the attached
+    // `--repo=cad0p/foreign` token → ABSENT → RELEASE, hiding a
+    // foreign target (fail-open-leaning). Control: bare `--repo=`
+    // form fires. Narrow — accepted, FOR CORE. Red on silent flip.
+    const ctx = ctxWith("gh pr merge -r --repo=cad0p/foreign", {
+      remote: "https://github.com/cad0p/pi-steering-github.git",
+    });
+    assert.equal(await foreignRepoTarget(true, ctx), false);
+  });
+
+  it("ACCEPTED EDGE (collision alarm -s): bool-context over-consumption hides --repo", async () => {
+    // `gh pr merge -s --repo=cad0p/foreign`: `-s` is bool under `pr
+    // merge` (`-s/--squash`) but the table resolves takesValue:true
+    // (source row, see COLLISION ALARMS in ../descriptors.ts), so
+    // `-s` CONSUMES the attached `--repo=cad0p/foreign` token →
+    // ABSENT → RELEASE, hiding a foreign target (fail-open-leaning).
+    // Narrow — accepted, FOR CORE. Red on silent flip.
+    const ctx = ctxWith("gh pr merge -s --repo=cad0p/foreign", {
+      remote: "https://github.com/cad0p/pi-steering-github.git",
+    });
+    assert.equal(await foreignRepoTarget(true, ctx), false);
+  });
+
+  it("ACCEPTED EDGE (collision alarm -d): bool-context over-consumption hides --repo", async () => {
+    // `gh pr merge -d --repo=cad0p/foreign`: `-d` is bool under `pr
+    // merge` (`-d/--delete-branch`) and under `pr create`
+    // (`-d/--draft`) but the table resolves takesValue:true
+    // (description row — free-text is the most hijack-prone value,
+    // see COLLISION ALARMS in ../descriptors.ts), so `-d` CONSUMES
+    // the attached `--repo=cad0p/foreign` token → ABSENT → RELEASE,
+    // hiding a foreign target (fail-open-leaning). Narrow —
+    // accepted, FOR CORE. Red on silent flip.
+    const ctx = ctxWith("gh pr merge -d --repo=cad0p/foreign", {
+      remote: "https://github.com/cad0p/pi-steering-github.git",
+    });
+    assert.equal(await foreignRepoTarget(true, ctx), false);
+  });
+
+  it("ACCEPTED EDGE (collision alarm -h): bool-context over-consumption hides --repo", async () => {
+    // `gh pr merge -h --repo=cad0p/foreign`: `-h` is bool help but
+    // the table resolves takesValue:true (homepage row — the help
+    // entry keeps `-h` as a bool spelling but consumption derives
+    // true from the homepage row, see COLLISION ALARMS in
+    // ../descriptors.ts), so `-h` CONSUMES the attached
+    // `--repo=cad0p/foreign` token → ABSENT → RELEASE, hiding a
+    // foreign target (fail-open-leaning). Predicate-level only: real
+    // help forms (`gh … -h`) still exempt via the rule's token-level
+    // `infoOnly` leaf, which uses its own bool entries, not table
+    // consumption. Accepted, FOR CORE. Red on silent flip.
+    const ctx = ctxWith("gh pr merge -h --repo=cad0p/foreign", {
+      remote: "https://github.com/cad0p/pi-steering-github.git",
+    });
+    assert.equal(await foreignRepoTarget(true, ctx), false);
   });
 });

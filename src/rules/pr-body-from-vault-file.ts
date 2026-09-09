@@ -13,9 +13,14 @@
  * file inside a napkin vault under `<repo>/prs/`. The
  * closing-keyword content check belongs to `pr-create-needs-issue-link`.
  *
- * The anchor matches ANY leading-flag position (#41, shared
- * `LEADING_FLAG_PAIRS` unit): pre-widening, a flag-first form released
- * by the foreign gate bypassed this policy entirely; now it lands here.
+ * Routes on `command: "gh"` + the `subcommand:` sequences — ANY
+ * leading-flag position is structural now (the descriptor's
+ * consuming-flag arity keeps `gh --hostname h pr create …` routed;
+ * pre-#41 a flag-first form released by the foreign gate bypassed
+ * this policy entirely, now it lands here). Edit scoping (#44): a
+ * `pr edit` carrying no body-affecting flag (`--body`/`-b`,
+ * `--body-file`/`-F`) skips this rule — label/title/state edits pass
+ * without the substitution.
  *
  * Strict — no override (schema default).
  *
@@ -42,7 +47,6 @@ import {
   findBodyFileValue,
   renderBodyFileDiff,
 } from "../helpers/pattern-args.ts";
-import { PR_BODY_ANCHOR } from "../helpers/patterns.ts";
 import { diagnose } from "../predicates/missing-vault-body-file.ts";
 
 /** The canonical static recipe (byte-identity pinned in `index.test.ts`). */
@@ -51,9 +55,18 @@ const STATIC = renderStaticRecipe("prs");
 export const prBodyFromVaultFile = {
   name: "pr-body-from-vault-file",
   tool: "bash",
-  field: "command",
-  pattern: PR_BODY_ANCHOR,
-  when: { missingVaultBodyFile: { section: "prs" } },
+  command: "gh",
+  when: {
+    subcommand: {
+      anyOf: [
+        ["pr", "create"],
+        ["pr", "new"],
+        ["pr", "edit"],
+      ],
+      onUnknown: "allow",
+    },
+    missingVaultBodyFile: { section: "prs" },
+  },
   reason: async (ctx) => {
     const v = findBodyFileValue(ctx);
     if (explainBodyFileArg(v) === "diff") {

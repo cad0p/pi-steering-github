@@ -11,7 +11,9 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, it } from "node:test";
-import type { PredicateContext } from "@cad0p/pi-steering";
+import type { PredicateContext, PredicateWord } from "@cad0p/pi-steering";
+import { mockContext } from "@cad0p/pi-steering/testing";
+import { GH_CLI_DESCRIPTOR } from "../descriptors.ts";
 import { bodyHasClosingKeyword } from "./body-keyword.ts";
 import { BODY_STRIP } from "./body-strip.ts";
 
@@ -21,7 +23,7 @@ import { BODY_STRIP } from "./body-strip.ts";
 
 type ExecStub = (
   cmd: string,
-  args: string[],
+  args: readonly string[],
   opts?: { cwd?: string },
 ) => Promise<{ stdout: string; stderr: string; exitCode: number }>;
 
@@ -42,11 +44,26 @@ function makeCtx(
   exec?: ExecStub,
   env?: ReadonlyMap<string, string>,
 ): PredicateContext {
-  const ctx = {
+  // mockContext binds the `ctx.command` facade through the owned gh
+  // descriptor (the inline `--body` fallback reads via the facade
+  // now); `"…"` words unwrap to their resolved value, exactly as
+  // the walker reports them.
+  const words: PredicateWord[] = args.map(({ text }) => {
+    if (text.length >= 2 && text.startsWith('"') && text.endsWith('"')) {
+      const value = text.slice(1, -1);
+      return { value, text, rawText: text, pos: 0, end: text.length };
+    }
+    return { value: text, text, rawText: text, pos: 0, end: text.length };
+  });
+  return mockContext({
     cwd,
-    tool: "bash",
-    input: { tool: "bash", command: "gh pr create", basename: "gh", args },
-    agentLoopIndex: 0,
+    input: {
+      tool: "bash",
+      command: "gh pr create",
+      basename: "gh",
+      args: words,
+    },
+    descriptors: { gh: GH_CLI_DESCRIPTOR },
     exec:
       exec ??
       (async (_cmd, _args) => ({
@@ -54,11 +71,8 @@ function makeCtx(
         stderr: "",
         exitCode: 0,
       })),
-    appendEntry: () => {},
-    findEntries: () => [],
-    walkerState: env !== undefined ? { cwd, env } : {},
-  };
-  return ctx as unknown as PredicateContext;
+    ...(env !== undefined ? { walkerState: { cwd, env } } : {}),
+  });
 }
 
 /** The pinned substitution form the rules require. */
@@ -89,7 +103,7 @@ function makeHomeWithDirectNote(): { home: string; cwd: string } {
 describe("bodyHasClosingKeyword", () => {
   /** Exec stub that answers the pinned perl call with stripped content. */
   function perlExec(bodyAfterFrontmatter: string): ExecStub {
-    return async (cmd, args) => {
+    return async (cmd, args: readonly string[]) => {
       if (cmd === "perl" && args[0] === "-0777" && args[1] === "-pe") {
         assert.equal(args[2], BODY_STRIP, "pinned program must be used");
         return {
@@ -161,7 +175,7 @@ describe("bodyHasClosingKeyword", () => {
     // shell handoff: the pinned perl receives what bash would hand
     // it. The stub asserts the file arg is the expanded path.
     const seen: string[] = [];
-    const exec: ExecStub = async (cmd, args) => {
+    const exec: ExecStub = async (cmd, args: readonly string[]) => {
       if (cmd === "perl") seen.push(args[3] ?? "");
       return { stdout: "Closes #12\n", stderr: "", exitCode: 0 };
     };
@@ -182,7 +196,7 @@ describe("bodyHasClosingKeyword", () => {
     // Bash-exact: the quoted tilde stays literal — perl receives
     // `~/…` verbatim (and would fail to open it, fail-closed).
     const seen: string[] = [];
-    const exec: ExecStub = async (cmd, args) => {
+    const exec: ExecStub = async (cmd, args: readonly string[]) => {
       if (cmd === "perl") seen.push(args[3] ?? "");
       return { stdout: "Closes #12\n", stderr: "", exitCode: 0 };
     };

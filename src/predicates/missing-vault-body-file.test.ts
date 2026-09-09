@@ -15,7 +15,9 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, it } from "node:test";
-import type { PredicateContext } from "@cad0p/pi-steering";
+import type { PredicateContext, PredicateWord } from "@cad0p/pi-steering";
+import { mockContext } from "@cad0p/pi-steering/testing";
+import { GH_CLI_DESCRIPTOR } from "../descriptors.ts";
 import { BODY_STRIP } from "../helpers/pattern-args.ts";
 import { diagnose, missingVaultBodyFile } from "./missing-vault-body-file.ts";
 
@@ -25,7 +27,7 @@ import { diagnose, missingVaultBodyFile } from "./missing-vault-body-file.ts";
 
 type ExecStub = (
   cmd: string,
-  args: string[],
+  args: readonly string[],
   opts?: { cwd?: string },
 ) => Promise<{ stdout: string; stderr: string; exitCode: number }>;
 
@@ -40,24 +42,33 @@ function makeCtx(
   cwd: string,
   exec?: ExecStub,
   env?: ReadonlyMap<string, string>,
+  command = "gh pr create",
 ): PredicateContext {
-  const ctx = {
+  // mockContext binds the `ctx.command` facade through the owned gh
+  // descriptor (the same binding production uses); `"…"` words
+  // unwrap to their resolved value, exactly as the walker reports
+  // them. `command` defaults to the create form and is overridden
+  // per-case.
+  const words: PredicateWord[] = args.map(({ text }) => {
+    if (text.length >= 2 && text.startsWith('"') && text.endsWith('"')) {
+      const value = text.slice(1, -1);
+      return { value, text, rawText: text, pos: 0, end: text.length };
+    }
+    return { value: text, text, rawText: text, pos: 0, end: text.length };
+  });
+  return mockContext({
     cwd,
-    tool: "bash",
-    input: { tool: "bash", command: "gh pr create", basename: "gh", args },
-    agentLoopIndex: 0,
+    input: { tool: "bash", command, basename: "gh", args: words },
+    descriptors: { gh: GH_CLI_DESCRIPTOR },
     exec:
       exec ??
-      (async (_cmd, _args) => ({
+      (async (_cmd, _args: readonly string[]) => ({
         stdout: "",
         stderr: "",
         exitCode: 0,
       })),
-    appendEntry: () => {},
-    findEntries: () => [],
-    walkerState: env !== undefined ? { cwd, env } : {},
-  };
-  return ctx as unknown as PredicateContext;
+    ...(env !== undefined ? { walkerState: { cwd, env } } : {}),
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -158,6 +169,91 @@ describe("missingVaultBodyFile", () => {
       "/work/repo",
     );
     assert.equal(await missingVaultBodyFile({ section: "prs" }, ctx), true);
+  });
+
+  it("#44: does NOT fire for label/title/state edits (no body-affecting flag)", async () => {
+    // The vault-body policy applies to an edit only when the command
+    // writes the body — the pi#8845 live over-block (`gh issue edit
+    // 8845 --add-label bug`).
+    for (const [section, args, command] of [
+      [
+        "issues",
+        [
+          { text: "issue" },
+          { text: "edit" },
+          { text: "8845" },
+          { text: "--add-label" },
+          { text: "bug" },
+        ],
+        "gh issue edit 8845 --add-label bug",
+      ],
+      [
+        "issues",
+        [
+          { text: "issue" },
+          { text: "edit" },
+          { text: "29" },
+          { text: "--title" },
+          { text: "t" },
+        ],
+        "gh issue edit 29 --title t",
+      ],
+      [
+        "prs",
+        [
+          { text: "pr" },
+          { text: "edit" },
+          { text: "46" },
+          { text: "--state" },
+          { text: "closed" },
+        ],
+        "gh pr edit 46 --state closed",
+      ],
+    ] as const) {
+      const ctx = makeCtx(args, "/work/repo", undefined, undefined, command);
+      assert.equal(
+        await missingVaultBodyFile({ section }, ctx),
+        false,
+        `expected release for: ${command}`,
+      );
+    }
+  });
+
+  it("#44: still fires for edits carrying --body / --body-file", async () => {
+    // An inline --body is a direct write (bodies must come from the
+    // vault); a direct --body-file path uploads verbatim — both
+    // stay blocked.
+    const inline = makeCtx(
+      [
+        { text: "issue" },
+        { text: "edit" },
+        { text: "29" },
+        { text: "--body" },
+        { text: "inline" },
+      ],
+      "/work/repo",
+      undefined,
+      undefined,
+      "gh issue edit 29 --body inline",
+    );
+    assert.equal(
+      await missingVaultBodyFile({ section: "issues" }, inline),
+      true,
+    );
+    const direct = makeCtx(
+      [
+        { text: "pr" },
+        { text: "edit" },
+        { text: "46" },
+        { text: "--body-file" },
+        { text: "/direct.md" },
+      ],
+      "/work/repo",
+      undefined,
+      undefined,
+      "gh pr edit 46 --body-file /direct.md",
+    );
+    assert.equal(await missingVaultBodyFile({ section: "prs" }, direct), true);
   });
 
   it("does NOT fire for the pinned perl substitution (valid vault prs/ file)", async () => {
