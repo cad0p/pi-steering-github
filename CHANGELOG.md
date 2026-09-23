@@ -39,6 +39,7 @@ All notable changes to this project will be documented in this file.
 ### 📚 Documentation
 
 - Fix stale H1-kept comments — the H1 is stripped too (closes #3)
+- AGENTS.md — pinned base text (drop Goldmine variant) (closes #64) ([#65](https://github.com/cad0p/pi-steering-github/pull/65))
 
 ### 🧪 Testing
 
